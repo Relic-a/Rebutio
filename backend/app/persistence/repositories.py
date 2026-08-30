@@ -1,0 +1,491 @@
+import datetime
+import uuid
+from typing import Any, Dict, List, Optional
+from sqlalchemy import delete, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from backend.app.models.db import (
+    DebateReview,
+    DebateSession,
+    DebateTurn,
+    LearningProgress,
+    ReviewFeedback,
+    SpeechProfile,
+    TemporaryTurnEvidence,
+    TopicInventory,
+    User,
+    utcnow,
+)
+from backend.app.services.privacy.encryption import encryptor
+
+
+class UserRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_or_create_user(self, user_id: Optional[str] = None) -> User:
+        if user_id:
+            stmt = select(User).where(User.id == user_id).options(
+                selectinload(User.progress),
+                selectinload(User.speech_profile),
+            )
+            res = await self.db.execute(stmt)
+            user = res.scalar_one_or_none()
+            if user:
+                return user
+
+        new_user_id = user_id or str(uuid.uuid4())
+        user = User(
+            id=new_user_id,
+            onboarded=False,
+            preferences_encrypted=None,
+            save_transcripts=False,
+            captions_enabled=True,
+        )
+        self.db.add(user)
+        await self.db.flush()
+
+        progress = LearningProgress(
+            user_id=new_user_id,
+            xp=0,
+            streak_days=1,
+            streak_history_json=[1, 1, 1, 0, 1, 1, 1],
+            debates_completed=0,
+            wins=0,
+            losses=0,
+            draws=0,
+            stars_by_node_json={},
+        )
+        self.db.add(progress)
+
+        speech_prof = SpeechProfile(
+            user_id=new_user_id,
+            profile_encrypted=None,
+        )
+        self.db.add(speech_prof)
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
+    async def update_preferences(self, user_id: str, prefs_dict: dict, onboarded: bool = True) -> User:
+        encrypted_prefs = encryptor.encrypt_json(prefs_dict)
+        stmt = (
+            update(User)
+            .where(User.id == user_id)
+            .values(
+                preferences_encrypted=encrypted_prefs,
+                onboarded=onboarded,
+                updated_at=utcnow(),
+            )
+        )
+        await self.db.execute(stmt)
+        await self.db.commit()
+        return await self.get_or_create_user(user_id)
+
+    async def update_settings(
+        self,
+        user_id: str,
+        save_transcripts: Optional[bool] = None,
+        captions_enabled: Optional[bool] = None,
+        intensity: Optional[str] = None,
+    ) -> User:
+        user = await self.get_or_create_user(user_id)
+        values = {"updated_at": utcnow()}
+        if save_transcripts is not None:
+            values["save_transcripts"] = save_transcripts
+        if captions_enabled is not None:
+            values["captions_enabled"] = captions_enabled
+
+        if intensity is not None:
+            current_prefs = encryptor.decrypt_json(user.preferences_encrypted) or {}
+            current_prefs["intensity"] = intensity
+            values["preferences_encrypted"] = encryptor.encrypt_json(current_prefs)
+
+        stmt = update(User).where(User.id == user_id).values(**values)
+        await self.db.execute(stmt)
+        await self.db.commit()
+        return await self.get_or_create_user(user_id)
+
+    def get_preferences(self, user: User) -> Optional[dict]:
+        return encryptor.decrypt_json(user.preferences_encrypted)
+
+
+class ProgressRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_progress(self, user_id: str) -> LearningProgress:
+        stmt = select(LearningProgress).where(LearningProgress.user_id == user_id)
+        res = await self.db.execute(stmt)
+        progress = res.scalar_one_or_none()
+        if not progress:
+            progress = LearningProgress(
+                user_id=user_id,
+                xp=0,
+                streak_days=1,
+                streak_history_json=[1, 1, 1, 0, 1, 1, 1],
+                debates_completed=0,
+                wins=0,
+                losses=0,
+                draws=0,
+                stars_by_node_json={},
+            )
+            self.db.add(progress)
+            await self.db.commit()
+            await self.db.refresh(progress)
+        return progress
+
+    async def record_debate_completion(
+        self,
+        user_id: str,
+        skill_id: str,
+        stars_earned: int,
+        xp_earned: int,
+        outcome: str,
+        streak_extended: bool,
+    ) -> LearningProgress:
+        prog = await self.get_progress(user_id)
+        stars_map = dict(prog.stars_by_node_json or {})
+        prev_stars = stars_map.get(skill_id, 0)
+        stars_map[skill_id] = max(prev_stars, stars_earned)
+
+        new_wins = prog.wins + (1 if outcome == "user_win" else 0)
+        new_losses = prog.losses + (1 if outcome == "opponent_win" else 0)
+        new_draws = prog.draws + (1 if outcome == "draw" else 0)
+        new_streak = prog.streak_days + (1 if streak_extended else 0)
+
+        prog.xp += xp_earned
+        prog.streak_days = new_streak
+        prog.debates_completed += 1
+        prog.wins = new_wins
+        prog.losses = new_losses
+        prog.draws = new_draws
+        prog.stars_by_node_json = stars_map
+        prog.last_activity_date = datetime.date.today().isoformat()
+
+        await self.db.commit()
+        await self.db.refresh(prog)
+        return prog
+
+
+class SpeechProfileRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_profile(self, user_id: str) -> Optional[dict]:
+        stmt = select(SpeechProfile).where(SpeechProfile.user_id == user_id)
+        res = await self.db.execute(stmt)
+        record = res.scalar_one_or_none()
+        if not record or not record.profile_encrypted:
+            return None
+        return encryptor.decrypt_json(record.profile_encrypted)
+
+    async def save_profile(self, user_id: str, profile_dict: dict):
+        encrypted = encryptor.encrypt_json(profile_dict)
+        stmt = select(SpeechProfile).where(SpeechProfile.user_id == user_id)
+        res = await self.db.execute(stmt)
+        record = res.scalar_one_or_none()
+        if record:
+            record.profile_encrypted = encrypted
+            record.updated_at = utcnow()
+        else:
+            self.db.add(SpeechProfile(user_id=user_id, profile_encrypted=encrypted))
+        await self.db.commit()
+
+    async def delete_profile(self, user_id: str):
+        stmt = update(SpeechProfile).where(SpeechProfile.user_id == user_id).values(profile_encrypted=None, updated_at=utcnow())
+        await self.db.execute(stmt)
+        await self.db.commit()
+
+
+class TopicInventoryRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_available_topics(self, user_id: str, limit: int = 10) -> List[TopicInventory]:
+        stmt = (
+            select(TopicInventory)
+            .where(TopicInventory.user_id == user_id, TopicInventory.consumed == False)
+            .order_by(TopicInventory.created_at.desc())
+            .limit(limit)
+        )
+        res = await self.db.execute(stmt)
+        return list(res.scalars().all())
+
+    async def count_available_topics(self, user_id: str) -> int:
+        stmt = select(TopicInventory).where(TopicInventory.user_id == user_id, TopicInventory.consumed == False)
+        res = await self.db.execute(stmt)
+        return len(list(res.scalars().all()))
+
+    async def get_topic_by_id(self, user_id: str, topic_id: str) -> Optional[TopicInventory]:
+        stmt = select(TopicInventory).where(
+            TopicInventory.user_id == user_id,
+            TopicInventory.topic_id == topic_id,
+        )
+        res = await self.db.execute(stmt)
+        return res.scalar_one_or_none()
+
+    async def add_topics(self, user_id: str, topics: List[dict]):
+        for t in topics:
+            item = TopicInventory(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                topic_id=t.get("id") or str(uuid.uuid4()),
+                topic_text=t["statement"],
+                skill_id=t["skill_id"],
+                difficulty=t.get("difficulty", "steady"),
+                turns=t.get("turns", 4),
+                estimated_minutes=t.get("minutes", 6),
+                reminder=t.get("reminder", ""),
+                consumed=False,
+            )
+            self.db.add(item)
+        await self.db.commit()
+
+    async def mark_consumed(self, user_id: str, topic_id: str):
+        stmt = (
+            update(TopicInventory)
+            .where(TopicInventory.user_id == user_id, TopicInventory.topic_id == topic_id)
+            .values(consumed=True)
+        )
+        await self.db.execute(stmt)
+        await self.db.commit()
+
+
+class DebateSessionRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create_session(
+        self,
+        session_id: str,
+        user_id: str,
+        topic_id: str,
+        topic_text: str,
+        skill_id: str,
+        skill_name: str,
+        skill_hint: str,
+        skill_reminder: str,
+        difficulty: str,
+        user_side: str,
+        total_user_turns: int,
+    ) -> DebateSession:
+        sess = DebateSession(
+            id=session_id,
+            user_id=user_id,
+            topic_id=topic_id,
+            topic_text=topic_text,
+            skill_id=skill_id,
+            skill_name=skill_name,
+            skill_hint=skill_hint,
+            skill_reminder=skill_reminder,
+            difficulty=difficulty,
+            user_side=user_side,
+            total_user_turns=total_user_turns,
+            current_turn=1,
+            status="active",
+        )
+        self.db.add(sess)
+        await self.db.commit()
+        await self.db.refresh(sess)
+        return sess
+
+    async def get_session(self, session_id: str) -> Optional[DebateSession]:
+        stmt = (
+            select(DebateSession)
+            .where(DebateSession.id == session_id)
+            .options(
+                selectinload(DebateSession.turns),
+                selectinload(DebateSession.review),
+                selectinload(DebateSession.evidence),
+            )
+        )
+        res = await self.db.execute(stmt)
+        return res.scalar_one_or_none()
+
+    async def get_active_session_for_user(self, user_id: str) -> Optional[DebateSession]:
+        stmt = (
+            select(DebateSession)
+            .where(DebateSession.user_id == user_id, DebateSession.status == "active")
+            .order_by(DebateSession.created_at.desc())
+            .options(selectinload(DebateSession.turns))
+            .limit(1)
+        )
+        res = await self.db.execute(stmt)
+        return res.scalar_one_or_none()
+
+    async def save_turn(
+        self,
+        session_id: str,
+        turn_number: int,
+        speaker: str,
+        text: Optional[str],
+        audio_available: bool = False,
+        duration_sec: float = 0.0,
+        client_response_delay_ms: int = 0,
+        idempotency_key: Optional[str] = None,
+    ) -> DebateTurn:
+        if idempotency_key:
+            stmt = select(DebateTurn).where(
+                DebateTurn.session_id == session_id,
+                DebateTurn.idempotency_key == idempotency_key,
+            )
+            res = await self.db.execute(stmt)
+            existing = res.scalar_one_or_none()
+            if existing:
+                return existing
+
+        turn_id = f"t-{speaker[0]}-{turn_number}-{uuid.uuid4().hex[:6]}"
+        encrypted_text = encryptor.encrypt_str(text) if text else None
+
+        turn = DebateTurn(
+            id=turn_id,
+            session_id=session_id,
+            turn_number=turn_number,
+            speaker=speaker,
+            text_encrypted=encrypted_text,
+            audio_available=audio_available,
+            duration_sec=duration_sec,
+            client_response_delay_ms=client_response_delay_ms,
+            idempotency_key=idempotency_key,
+        )
+        self.db.add(turn)
+        await self.db.commit()
+        await self.db.refresh(turn)
+        return turn
+
+    async def update_current_turn(self, session_id: str, next_turn_number: int, status: Optional[str] = None):
+        values = {"current_turn": next_turn_number, "updated_at": utcnow()}
+        if status:
+            values["status"] = status
+        stmt = update(DebateSession).where(DebateSession.id == session_id).values(**values)
+        await self.db.execute(stmt)
+        await self.db.commit()
+
+    async def save_pre_final_analysis(self, session_id: str, analysis_dict: dict):
+        encrypted = encryptor.encrypt_json(analysis_dict)
+        stmt = update(DebateSession).where(DebateSession.id == session_id).values(pre_final_analysis_encrypted=encrypted)
+        await self.db.execute(stmt)
+        await self.db.commit()
+
+    async def get_pre_final_analysis(self, session_id: str) -> Optional[dict]:
+        sess = await self.get_session(session_id)
+        if not sess or not sess.pre_final_analysis_encrypted:
+            return None
+        return encryptor.decrypt_json(sess.pre_final_analysis_encrypted)
+
+    async def save_temporary_evidence(self, session_id: str, turn_number: int, evidence_dict: dict):
+        encrypted = encryptor.encrypt_json(evidence_dict)
+        stmt = select(TemporaryTurnEvidence).where(
+            TemporaryTurnEvidence.session_id == session_id,
+            TemporaryTurnEvidence.turn_number == turn_number,
+        )
+        res = await self.db.execute(stmt)
+        existing = res.scalar_one_or_none()
+        if existing:
+            existing.evidence_encrypted = encrypted
+        else:
+            self.db.add(TemporaryTurnEvidence(
+                id=str(uuid.uuid4()),
+                session_id=session_id,
+                turn_number=turn_number,
+                evidence_encrypted=encrypted,
+            ))
+        await self.db.commit()
+
+    async def get_all_temporary_evidence(self, session_id: str) -> List[dict]:
+        stmt = (
+            select(TemporaryTurnEvidence)
+            .where(TemporaryTurnEvidence.session_id == session_id)
+            .order_by(TemporaryTurnEvidence.turn_number.asc())
+        )
+        res = await self.db.execute(stmt)
+        records = res.scalars().all()
+        return [encryptor.decrypt_json(r.evidence_encrypted) for r in records if r.evidence_encrypted]
+
+    async def delete_temporary_evidence(self, session_id: str):
+        stmt = delete(TemporaryTurnEvidence).where(TemporaryTurnEvidence.session_id == session_id)
+        await self.db.execute(stmt)
+        await self.db.commit()
+
+    async def save_review(
+        self,
+        session_id: str,
+        user_id: str,
+        outcome: str,
+        stars: int,
+        completed: bool,
+        skill_demonstrated: bool,
+        mastery_note: Optional[str],
+        skill_assessment: Optional[dict],
+        argument_feedback: Optional[dict],
+        language_feedback: Optional[dict],
+        xp_earned: int,
+        streak_extended: bool,
+        next_level_unlocked: bool,
+    ) -> DebateReview:
+        stmt = select(DebateReview).where(DebateReview.session_id == session_id)
+        res = await self.db.execute(stmt)
+        existing = res.scalar_one_or_none()
+
+        encrypted_lang = encryptor.encrypt_json(language_feedback) if language_feedback else None
+
+        if existing:
+            existing.outcome = outcome
+            existing.stars = stars
+            existing.completed = completed
+            existing.skill_demonstrated = skill_demonstrated
+            existing.mastery_note = mastery_note
+            existing.skill_assessment_json = skill_assessment
+            existing.argument_feedback_json = argument_feedback
+            existing.language_feedback_encrypted = encrypted_lang
+            existing.xp_earned = xp_earned
+            existing.streak_extended = streak_extended
+            existing.next_level_unlocked = next_level_unlocked
+            review = existing
+        else:
+            review = DebateReview(
+                session_id=session_id,
+                user_id=user_id,
+                outcome=outcome,
+                stars=stars,
+                completed=completed,
+                skill_demonstrated=skill_demonstrated,
+                mastery_note=mastery_note,
+                skill_assessment_json=skill_assessment,
+                argument_feedback_json=argument_feedback,
+                language_feedback_encrypted=encrypted_lang,
+                xp_earned=xp_earned,
+                streak_extended=streak_extended,
+                next_level_unlocked=next_level_unlocked,
+            )
+            self.db.add(review)
+
+        stmt_status = update(DebateSession).where(DebateSession.id == session_id).values(status="finished", updated_at=utcnow())
+        await self.db.execute(stmt_status)
+        await self.db.commit()
+        return review
+
+    async def get_review(self, session_id: str) -> Optional[DebateReview]:
+        stmt = select(DebateReview).where(DebateReview.session_id == session_id)
+        res = await self.db.execute(stmt)
+        return res.scalar_one_or_none()
+
+    async def save_review_feedback(self, session_id: str, user_id: str, verdict: str, reason: Optional[str] = None):
+        fb = ReviewFeedback(
+            id=str(uuid.uuid4()),
+            session_id=session_id,
+            user_id=user_id,
+            verdict=verdict,
+            reason=reason,
+        )
+        self.db.add(fb)
+        await self.db.commit()
+
+    async def cleanup_finished_session_privacy(self, session_id: str, save_transcripts: bool):
+        await self.delete_temporary_evidence(session_id)
+        if not save_transcripts:
+            stmt = update(DebateTurn).where(DebateTurn.session_id == session_id).values(text_encrypted=None)
+            await self.db.execute(stmt)
+            await self.db.commit()
