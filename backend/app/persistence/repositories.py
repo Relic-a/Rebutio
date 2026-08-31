@@ -17,7 +17,10 @@ from backend.app.models.db import (
     User,
     utcnow,
 )
+from backend.app.observability.logging import get_logger
 from backend.app.services.privacy.encryption import encryptor
+
+logger = get_logger("rebutio.persistence")
 
 
 class UserRepository:
@@ -197,6 +200,7 @@ class SpeechProfileRepository:
         stmt = update(SpeechProfile).where(SpeechProfile.user_id == user_id).values(profile_encrypted=None, updated_at=utcnow())
         await self.db.execute(stmt)
         await self.db.commit()
+        logger.info("privacy.speech_profile_deleted", user_id=user_id)
 
 
 class TopicInventoryRepository:
@@ -485,7 +489,18 @@ class DebateSessionRepository:
 
     async def cleanup_finished_session_privacy(self, session_id: str, save_transcripts: bool):
         await self.delete_temporary_evidence(session_id)
+        stmt_pre = update(DebateSession).where(DebateSession.id == session_id).values(pre_final_analysis_encrypted=None)
+        await self.db.execute(stmt_pre)
+        logger.info("privacy.session_evidence_deleted", session_id=session_id)
         if not save_transcripts:
             stmt = update(DebateTurn).where(DebateTurn.session_id == session_id).values(text_encrypted=None)
             await self.db.execute(stmt)
-            await self.db.commit()
+            logger.info("privacy.transcript_deleted", session_id=session_id)
+        await self.db.commit()
+
+    async def cleanup_abandoned_evidence(self, hours: int = 24):
+        cutoff = utcnow() - datetime.timedelta(hours=hours)
+        stmt = delete(TemporaryTurnEvidence).where(TemporaryTurnEvidence.created_at < cutoff)
+        res = await self.db.execute(stmt)
+        await self.db.commit()
+        logger.info("privacy.history_retention_applied", retention_hours=hours)

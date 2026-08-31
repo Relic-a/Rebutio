@@ -1,9 +1,10 @@
-import logging
 from typing import Any, Dict, List, Optional, Set
 import httpx
 from backend.app.config import settings
+from backend.app.observability.logging import get_logger
+from backend.app.services.ai.config import AICompletionResult
 
-logger = logging.getLogger("rebutio.router_com")
+logger = get_logger("rebutio.router_com")
 
 ROUTER_COM_BASE_URL = "https://api.router.com/v1"
 
@@ -42,18 +43,18 @@ class RouterComClient:
                     self._validated_models = models
                     return models
         except Exception as e:
-            logger.warning(f"Router.com model list fetch failed: {e}")
+            logger.warning("router_com.model_list_failed", error=str(e))
 
         return set()
 
-    async def chat_completion(
+    async def chat_completion_raw(
         self,
         messages: List[dict],
         model: str,
         temperature: float = 0.7,
         max_tokens: int = 1024,
         response_format_json: bool = False,
-    ) -> str:
+    ) -> AICompletionResult:
         if not self.is_configured:
             raise ValueError("Router.com API key not configured")
 
@@ -73,15 +74,50 @@ class RouterComClient:
         async with httpx.AsyncClient(timeout=45.0) as client:
             resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code != 200:
-                logger.error(f"Router.com Chat Completion error: HTTP {resp.status_code}")
+                logger.error("router_com.chat.error", status_code=resp.status_code)
                 resp.raise_for_status()
 
             res_json = resp.json()
             choices = res_json.get("choices", [])
             if not choices:
                 raise ValueError("Router.com returned empty choices")
-            content = choices[0].get("message", {}).get("content", "")
-            return content.strip()
+
+            first_choice = choices[0]
+            content = first_choice.get("message", {}).get("content", "").strip()
+            finish_reason = first_choice.get("finish_reason")
+
+            usage = res_json.get("usage", {})
+            input_tokens = usage.get("prompt_tokens")
+            output_tokens = usage.get("completion_tokens")
+            provider_req_id = res_json.get("id") or resp.headers.get("x-request-id")
+            resolved_model = res_json.get("model") or model
+
+            return AICompletionResult(
+                content=content,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                provider_request_id=provider_req_id,
+                finish_reason=finish_reason,
+                resolved_model=resolved_model,
+                upstream_provider="router_com",
+            )
+
+    async def chat_completion(
+        self,
+        messages: List[dict],
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+        response_format_json: bool = False,
+    ) -> str:
+        res = await self.chat_completion_raw(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format_json=response_format_json,
+        )
+        return res.content
 
 
 router_com_client = RouterComClient()

@@ -27,6 +27,16 @@ class RoleCandidate(BaseModel):
     max_tokens: int = 2048
 
 
+class AICompletionResult(BaseModel):
+    content: str
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    provider_request_id: Optional[str] = None
+    finish_reason: Optional[str] = None
+    resolved_model: Optional[str] = None
+    upstream_provider: Optional[str] = None
+
+
 def get_role_candidates(role: ModelRole) -> List[RoleCandidate]:
     candidates = []
 

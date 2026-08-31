@@ -1,4 +1,3 @@
-import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,22 +12,71 @@ from backend.app.api.review import router as review_router
 from backend.app.api.sessions import router as sessions_router
 from backend.app.api.settings import router as settings_router
 from backend.app.config import settings
+from backend.app.observability.logging import get_logger, setup_logging
+from backend.app.observability.middleware import RequestLoggingMiddleware
 from backend.app.persistence.db import init_db
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+# Initialize structured logging centrally
+setup_logging(
+    log_level=settings.LOG_LEVEL,
+    log_format=settings.LOG_FORMAT,
+    log_ai_content=settings.LOG_AI_CONTENT,
 )
-logger = logging.getLogger("rebutio.main")
+logger = get_logger("rebutio.main")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Initializing Rebutio database...")
+    # Log startup configuration safely without secrets
+    db_type = "postgresql" if "postgresql" in settings.DATABASE_URL else "sqlite"
+    logger.info(
+        "app.started",
+        environment="development" if "localhost" in settings.FRONTEND_ORIGIN else "production",
+        database=db_type,
+        openrouter_configured=bool(settings.OPENROUTER_API_KEY),
+        router_configured=bool(settings.RAMP_ROUTER_API_KEY),
+        modal_configured=bool(settings.MODAL_APP_NAME),
+        log_level=settings.LOG_LEVEL,
+        log_format=settings.LOG_FORMAT,
+        ai_content_logging=settings.LOG_AI_CONTENT,
+    )
+
+    # Log model-role mapping safely
+    logger.info(
+        "app.model_configuration",
+        debate_opponent=f"router:{settings.ROUTER_DEBATE_MODEL}" if settings.ROUTER_DEBATE_MODEL and settings.RAMP_ROUTER_API_KEY else f"openrouter:{settings.OPENROUTER_DEBATE_MODEL}",
+        language_analysis=f"router:{settings.ROUTER_ANALYSIS_MODEL}" if settings.ROUTER_ANALYSIS_MODEL and settings.RAMP_ROUTER_API_KEY else f"openrouter:{settings.OPENROUTER_ANALYSIS_MODEL}",
+        final_patch=f"openrouter:{settings.OPENROUTER_FINAL_PATCH_MODEL}",
+        reviewer=f"router:{settings.ROUTER_REVIEW_MODEL}" if settings.ROUTER_REVIEW_MODEL and settings.RAMP_ROUTER_API_KEY else f"openrouter:{settings.OPENROUTER_REVIEW_MODEL}",
+        topic_generator=f"router:{settings.ROUTER_TOPIC_MODEL}" if settings.ROUTER_TOPIC_MODEL and settings.RAMP_ROUTER_API_KEY else f"openrouter:{settings.OPENROUTER_TOPIC_MODEL}",
+        transcription=f"openrouter:{settings.OPENROUTER_TRANSCRIPTION_MODEL}",
+        speech=f"openrouter:{settings.OPENROUTER_TTS_MODEL}",
+    )
+
+    logger.info("db.init.started")
     await init_db()
-    logger.info("Rebutio database initialized.")
+    logger.info("db.init.completed")
+
+    # Validate Router.com catalog at startup if configured
+    from backend.app.services.ai.router_com import router_com_client
+    if router_com_client.is_configured:
+        try:
+            available_models = await router_com_client.get_available_models()
+            logger.info("router_com.catalog_validated", available_models_count=len(available_models))
+            configured_models = [
+                settings.ROUTER_DEBATE_MODEL,
+                settings.ROUTER_ANALYSIS_MODEL,
+                settings.ROUTER_REVIEW_MODEL,
+                settings.ROUTER_TOPIC_MODEL,
+            ]
+            for m in configured_models:
+                if m and m not in available_models:
+                    logger.warning("router_com.model_not_in_catalog", model=m)
+        except Exception as e:
+            logger.warning("router_com.catalog_validation_failed", error=str(e))
+
     yield
-    logger.info("Rebutio backend shutting down.")
+    logger.info("app.stopped")
 
 
 app = FastAPI(
@@ -38,16 +86,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Correlation & Request Logging Middleware
+app.add_middleware(RequestLoggingMiddleware)
+
 # CORS Configuration
 origins = [
     settings.FRONTEND_ORIGIN,
     "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"^https?:\/\/(localhost|127\.0\.0\.1)(:[0-9]+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

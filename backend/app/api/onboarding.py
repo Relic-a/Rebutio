@@ -13,12 +13,15 @@ from backend.app.models.schemas import (
     OnboardingPreferencesSchema,
     StartDebateResponseSchema,
 )
+from backend.app.observability.context import bind_context
+from backend.app.observability.logging import get_logger
 from backend.app.persistence.db import get_db
 from backend.app.persistence.repositories import (
     DebateSessionRepository,
     UserRepository,
 )
 
+logger = get_logger("rebutio.onboarding")
 router = APIRouter(prefix="/api/onboarding", tags=["onboarding"])
 
 FIRST_SPAR_TOPICS_BY_INTEREST = {
@@ -45,6 +48,7 @@ async def save_onboarding_preferences(
 ):
     user_repo = UserRepository(db)
     await user_repo.update_preferences(user.id, prefs.model_dump(), onboarded=True)
+    logger.info("onboarding.preferences_saved", user_id=user.id, intensity=prefs.intensity, goals_count=len(prefs.goals), interests_count=len(prefs.interests))
 
     # Populate initial rolling topic inventory in the background
     asyncio.create_task(TopicInventoryService._background_refill(user.id))
@@ -85,6 +89,18 @@ async def start_onboarding_spar(
         difficulty="gentle",
         user_side=side,
         total_user_turns=total_turns,
+    )
+
+    bind_context(session_id=session_id, user_id=user.id)
+    logger.info(
+        "debate.session.started",
+        session_id=session_id,
+        topic_id=topic_id,
+        skill_id=skill.id,
+        user_side=side,
+        total_turns=total_turns,
+        difficulty="gentle",
+        onboarding=True,
     )
 
     session_schema = DebateSessionSchema(

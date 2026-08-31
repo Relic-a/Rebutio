@@ -4,20 +4,24 @@ Executes DeepFilterNet3 (denoising) and KoelLabs/xlsr-english-01 (phoneme alignm
 on remote CPU workers with memory snapshotting enabled.
 """
 
-import io
+import json
 import os
+import time
 import modal
 
 # Define Modal App
 app = modal.App("rebutio-speech-analysis")
 
+# Remote persistent volume for caching Hugging Face & DeepFilterNet weights across deployments
+model_cache_volume = modal.Volume.from_name("rebutio-model-cache", create_if_missing=True)
+
 # Remote container image definition with PyTorch CPU, DeepFilterNet, Transformers, Librosa
 speech_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("ffmpeg", "libsndfile1")
+    .apt_install("git", "ffmpeg", "libsndfile1")
     .pip_install(
-        "torch==2.3.1",
-        "torchaudio==2.3.1",
+        "torch>=2.5.0",
+        "torchaudio>=2.5.0",
         index_url="https://download.pytorch.org/whl/cpu",
     )
     .pip_install(
@@ -35,11 +39,21 @@ speech_image = (
 hf_secret = modal.Secret.from_name("rebutio-huggingface", required_keys=["HF_TOKEN"])
 
 
+def _modal_log(event: str, **kwargs):
+    """Outputs compact structured JSON logs in remote Modal container."""
+    payload = {"event": event, "timestamp": time.time(), **kwargs}
+    print(json.dumps(payload))
+
+
 @app.cls(
     image=speech_image,
     cpu=4.0,
     memory=8192,
     secrets=[hf_secret],
+    volumes={
+        "/root/.cache/huggingface": model_cache_volume,
+        "/root/.cache/deepfilternet": model_cache_volume,
+    },
     min_containers=0,
     buffer_containers=0,
     max_containers=20,
@@ -54,7 +68,7 @@ class SpeechAnalysisWorker:
         from df.enhance import init_df
         from transformers import AutoProcessor, AutoModelForCTC
 
-        print("[Modal] Initializing DeepFilterNet3 and KoelLabs/xlsr-english-01 for memory snapshot...")
+        _modal_log("worker.initialized", action="loading_models")
         
         # 1. Initialize DeepFilterNet3 model
         self.df_model, self.df_state, _ = init_df()
@@ -72,10 +86,18 @@ class SpeechAnalysisWorker:
         with torch.no_grad():
             _ = self.koel_model(**inputs).logits
 
-        print("[Modal] Model initialization complete. Container memory snapshot ready.")
+        _modal_log("models.loaded", model_id=self.model_id)
+        _modal_log("snapshot_ready")
 
     @modal.method()
-    def analyze_phonemes(self, audio_bytes: bytes, audio_format: str = "webm") -> dict:
+    def analyze_phonemes(
+        self,
+        audio_bytes: bytes,
+        audio_format: str = "webm",
+        correlation_id: str = None,
+        session_id: str = None,
+        turn_id: str = None,
+    ) -> dict:
         """
         Processes raw audio bytes through:
         1. Audio decode to mono float32 tensor
@@ -89,6 +111,16 @@ class SpeechAnalysisWorker:
         import torch
         import torchaudio
         from df.enhance import enhance
+
+        start_time = time.perf_counter()
+        _modal_log(
+            "inference.started",
+            correlation_id=correlation_id,
+            session_id=session_id,
+            turn_id=turn_id,
+            audio_size_bytes=len(audio_bytes) if audio_bytes else 0,
+            audio_format=audio_format,
+        )
 
         if not audio_bytes:
             return {"audio_duration_ms": 0, "phonemes": [], "speech_metrics": {}}
@@ -105,6 +137,7 @@ class SpeechAnalysisWorker:
                     data = data.mean(axis=1)
                 waveform = torch.from_numpy(data.astype(np.float32)).unsqueeze(0)
             except Exception as e:
+                _modal_log("inference.failed", stage="decode", error=str(e))
                 return {
                     "error": f"Failed to decode audio: {str(e)}",
                     "audio_duration_ms": 0,
@@ -128,10 +161,14 @@ class SpeechAnalysisWorker:
             df_input = waveform
 
         # 3. Enhance audio with DeepFilterNet3
+        t_df = time.perf_counter()
         try:
             enhanced_waveform = enhance(self.df_model, self.df_state, df_input)
-        except Exception:
+        except Exception as e:
+            _modal_log("deepfilter.failed", error=str(e))
             enhanced_waveform = df_input
+        df_dur_ms = round((time.perf_counter() - t_df) * 1000, 2)
+        _modal_log("deepfilter.completed", duration_ms=df_dur_ms)
 
         # 4. Resample enhanced audio to 16kHz for KoelLabs CTC model
         koel_sr = 16000
@@ -144,14 +181,16 @@ class SpeechAnalysisWorker:
         koel_audio_np = koel_input.squeeze().cpu().numpy()
 
         # 5. Extract phonemes with KoelLabs CTC model
+        t_koel = time.perf_counter()
         inputs = self.processor(koel_audio_np, sampling_rate=koel_sr, return_tensors="pt")
         with torch.no_grad():
             logits = self.koel_model(**inputs).logits
 
         predicted_ids = torch.argmax(logits, dim=-1)[0].cpu().numpy()
+        koel_dur_ms = round((time.perf_counter() - t_koel) * 1000, 2)
+        _modal_log("koellabs.completed", duration_ms=koel_dur_ms)
         
         # CTC decode with timestamp alignment
-        # Approximate frame duration in ms: stride is typically 20ms or 320 samples at 16kHz
         time_per_frame_ms = (audio_duration_ms / max(1, len(predicted_ids)))
         
         phonemes_list = []
@@ -198,6 +237,15 @@ class SpeechAnalysisWorker:
             if gap > 250:  # Pause threshold: 250ms
                 gaps_count += 1
                 total_pause_ms += gap
+
+        total_dur_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        _modal_log(
+            "inference.completed",
+            duration_ms=total_dur_ms,
+            audio_duration_ms=audio_duration_ms,
+            phoneme_count=len(phonemes_list),
+            in_speech_gaps_count=gaps_count,
+        )
 
         # Structured linguistic evidence
         evidence = {

@@ -44,10 +44,10 @@ async def get_current_user(
         user_id = verify_signed_user_id(rebutio_session)
 
     if not user_id:
-        # Check custom header if provided by frontend
-        header_user_id = request.headers.get("X-User-ID")
-        if header_user_id:
-            user_id = header_user_id
+        # Check signed header if provided by client/testing
+        header_signed = request.headers.get("X-User-ID-Signed")
+        if header_signed:
+            user_id = verify_signed_user_id(header_signed)
 
     if not user_id:
         user_id = str(uuid.uuid4())

@@ -1,9 +1,11 @@
 import asyncio
-import logging
+import time
 from typing import Any, Dict, Optional
 from backend.app.config import settings
+from backend.app.observability.context import get_current_context
+from backend.app.observability.logging import get_logger
 
-logger = logging.getLogger("rebutio.modal")
+logger = get_logger("rebutio.modal")
 
 
 class ModalSpeechClient:
@@ -18,9 +20,9 @@ class ModalSpeechClient:
                 app_name = settings.MODAL_APP_NAME
                 cls = modal.Cls.from_name(app_name, "SpeechAnalysisWorker")
                 self._modal_worker = cls()
-                logger.info(f"Connected to remote Modal SpeechAnalysisWorker on app: {app_name}")
+                logger.info("modal.worker.connected", app_name=app_name)
             except Exception as e:
-                logger.warning(f"Remote Modal class lookup deferred/unavailable: {e}")
+                logger.warning("modal.worker.lookup_deferred", error=str(e))
                 self._modal_worker = None
             self._initialized = True
         return self._modal_worker
@@ -33,7 +35,8 @@ class ModalSpeechClient:
     ) -> Dict[str, Any]:
         """
         Executes DeepFilterNet3 + KoelLabs CTC remotely on Modal.
-        Falls back to lightweight synthetic phoneme estimation if remote worker is unavailable.
+        Logs safe structural metrics without dumping audio or raw phoneme contents.
+        Falls back gracefully if remote worker is unavailable.
         """
         if not audio_bytes:
             return {
@@ -43,6 +46,20 @@ class ModalSpeechClient:
                 "client_response_delay_ms": client_response_delay_ms,
             }
 
+        audio_size_bytes = len(audio_bytes)
+        audio_duration_ms = max(0, min(30000, audio_size_bytes // 32))
+        ctx = get_current_context()
+
+        logger.info(
+            "modal.phoneme_request.started",
+            audio_size_bytes=audio_size_bytes,
+            audio_duration_ms=audio_duration_ms,
+            audio_format=audio_format,
+            session_id=ctx.get("session_id"),
+            turn_id=ctx.get("turn_id"),
+        )
+
+        start_time = time.perf_counter()
         try:
             worker = self._get_worker()
             if worker is not None:
@@ -51,35 +68,46 @@ class ModalSpeechClient:
                     worker.analyze_phonemes.remote,
                     audio_bytes=audio_bytes,
                     audio_format=audio_format,
+                    correlation_id=ctx.get("request_id"),
+                    session_id=ctx.get("session_id"),
+                    turn_id=ctx.get("turn_id"),
+                )
+                dur_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                phoneme_count = len(result.get("phonemes", []))
+                gaps_count = result.get("speech_metrics", {}).get("in_speech_gaps_count", 0)
+
+                logger.info(
+                    "modal.phoneme_request.completed",
+                    duration_ms=dur_ms,
+                    audio_duration_ms=result.get("audio_duration_ms", audio_duration_ms),
+                    phoneme_count=phoneme_count,
+                    in_speech_gaps_count=gaps_count,
+                    fallback_used=False,
                 )
                 result["client_response_delay_ms"] = client_response_delay_ms
                 return result
         except Exception as e:
-            logger.warning(f"Remote Modal speech analysis call failed: {e}. Using fallback evidence.")
+            dur_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            logger.warning(
+                "modal.phoneme_request.failed",
+                duration_ms=dur_ms,
+                exception_type=e.__class__.__name__,
+                fallback_used=True,
+            )
 
-        # Fallback simulation for local development / testing when Modal app is not deployed
-        duration_ms = max(1000, min(30000, len(audio_bytes) // 32))
-        dummy_phonemes = [
-            {"phone": "h", "start_ms": 100, "end_ms": 180},
-            {"phone": "ɛ", "start_ms": 180, "end_ms": 300},
-            {"phone": "l", "start_ms": 300, "end_ms": 420},
-            {"phone": "oʊ", "start_ms": 420, "end_ms": 600},
-            {"phone": "ð", "start_ms": 700, "end_ms": 780},
-            {"phone": "ɪ", "start_ms": 780, "end_ms": 860},
-            {"phone": "s", "start_ms": 860, "end_ms": 940},
-        ]
+        # When remote Modal is unavailable, return empty phoneme evidence without fabricating fake phonemes
         return {
-            "audio_duration_ms": duration_ms,
-            "phonemes": dummy_phonemes,
+            "audio_duration_ms": audio_duration_ms,
+            "phonemes": [],
             "speech_metrics": {
-                "total_phonemes": len(dummy_phonemes),
-                "in_speech_gaps_count": 1,
-                "total_in_speech_pause_duration_ms": 100,
-                "first_phone_offset_ms": 100,
-                "last_phone_end_ms": 940,
+                "total_phonemes": 0,
+                "in_speech_gaps_count": 0,
+                "total_in_speech_pause_duration_ms": 0,
+                "first_phone_offset_ms": 0,
+                "last_phone_end_ms": 0,
             },
             "client_response_delay_ms": client_response_delay_ms,
-            "is_fallback": True,
+            "is_unavailable": True,
         }
 
 

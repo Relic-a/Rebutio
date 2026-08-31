@@ -3,10 +3,11 @@
 // Live debate experience. Renders the session it is given; knows nothing
 // about backends, providers, or transports. Deals in semantic states only.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { appService, noteCurrentSession } from "@/lib/api";
 import { capture } from "@/lib/media/capture";
+import { logger } from "@/lib/logger";
 import type { DebateReview, DebateSession, DebateSetup } from "@/lib/types";
 
 type Phase =
@@ -74,23 +75,54 @@ export function DebateFlow({
     return () => clearInterval(iv);
   }, [phase]);
 
-  function playOpponentAudio() {
+  function toggleOpponentAudio() {
     if (!opponentAudioUrl) return;
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.pause();
+
+    if (!audioPlayerRef.current) {
+      const audio = new Audio(opponentAudioUrl);
+      audioPlayerRef.current = audio;
+      audio.onplay = () => {
+        setIsPlayingAudio(true);
+        logger.debug("debate_flow.opponent_audio_play_started", { turnNumber });
+      };
+      audio.onpause = () => setIsPlayingAudio(false);
+      audio.onended = () => {
+        setIsPlayingAudio(false);
+        opponentReadyTimestampRef.current = Date.now();
+        logger.debug("debate_flow.opponent_audio_play_ended", { turnNumber });
+      };
+      audio.onerror = () => {
+        logger.warn("debate_flow.opponent_audio_play_failed", { turnNumber });
+        setIsPlayingAudio(false);
+      };
     }
-    const audio = new Audio(opponentAudioUrl);
-    audioPlayerRef.current = audio;
-    setIsPlayingAudio(true);
-    audio.onended = () => {
+
+    const audio = audioPlayerRef.current;
+    if (!audio.paused) {
+      audio.pause();
+      logger.debug("debate_flow.opponent_audio_paused", { turnNumber });
+      return;
+    }
+
+    audio.play().catch((err) => {
+      logger.warn("debate_flow.opponent_audio_play_blocked", { turnNumber });
       setIsPlayingAudio(false);
-      opponentReadyTimestampRef.current = Date.now();
-    };
-    audio.onerror = () => {
-      setIsPlayingAudio(false);
-    };
-    audio.play().catch(() => setIsPlayingAudio(false));
+    });
   }
+
+  useEffect(() => {
+    const audio = audioPlayerRef.current;
+    if (audio) {
+      audio.pause();
+      audioPlayerRef.current = null;
+    }
+    setIsPlayingAudio(false);
+  }, [opponentAudioUrl]);
+
+  useEffect(() => () => {
+    audioPlayerRef.current?.pause();
+    audioPlayerRef.current = null;
+  }, []);
 
   async function startRecording() {
     try {
@@ -99,7 +131,9 @@ export function DebateFlow({
       setClip(null);
       setMicDenied(false);
       setPhase("recording");
-    } catch {
+      logger.info("debate_flow.recording_started", { turnNumber, delayMs: delayMsRef.current });
+    } catch (err) {
+      logger.warn("debate_flow.mic_denied", { turnNumber });
       setMicDenied(true);
     }
   }
@@ -115,7 +149,9 @@ export function DebateFlow({
         });
       }
       setPhase("reviewing-clip");
-    } catch {
+      logger.info("debate_flow.recording_stopped", { turnNumber });
+    } catch (err) {
+      logger.error("debate_flow.recording_save_failed", { turnNumber }, err);
       setPhase("turn");
       setTurnError("Recording didn't save. Try again.");
     }
@@ -129,28 +165,37 @@ export function DebateFlow({
       setPhase("submitted");
       await new Promise((r) => setTimeout(r, reduceMotion ? 300 : 900));
       setPhase("thinking");
+      logger.info("debate_flow.turn_submitted", { turnNumber, sessionId: sessionRef.current.id });
       const res = await appService.submitUserTurn(sessionRef.current, {
         audio: clip ?? undefined,
         transcript: turnText ?? undefined,
         clientResponseDelayMs: delayMsRef.current,
       });
+      const turnsToAdd = [res.userTurn];
+      if (res.opponentTurn) {
+        turnsToAdd.push(res.opponentTurn);
+      }
       sessionRef.current = {
         ...sessionRef.current,
-        turns: [...sessionRef.current.turns, res.userTurn, res.opponentTurn],
+        turns: [...sessionRef.current.turns, ...turnsToAdd],
       };
-      setOpponentLine(res.opponentTurn.text ?? null);
-      setOpponentAudioAvailable(Boolean(res.opponentTurn.playback?.available));
-      setOpponentAudioUrl(res.opponentTurn.playback?.audioUrl ?? null);
+      if (res.opponentTurn) {
+        setOpponentLine(res.opponentTurn.text ?? null);
+        setOpponentAudioAvailable(Boolean(res.opponentTurn.playback?.available));
+        setOpponentAudioUrl(res.opponentTurn.playback?.audioUrl ?? null);
+      }
       opponentReadyTimestampRef.current = Date.now();
       if (res.finished) {
         setPhase("finished");
+        logger.info("debate_flow.session_finished", { sessionId: sessionRef.current.id });
         await new Promise((r) => setTimeout(r, reduceMotion ? 400 : 1600));
         setPhase("reviewing");
         try {
           const review = await appService.getDebateReview(sessionRef.current.id);
           await appService.finishDebate(sessionRef.current);
           onFinish(review);
-        } catch {
+        } catch (err) {
+          logger.warn("debate_flow.review_fetch_failed_using_fallback", { sessionId: sessionRef.current.id });
           // review unavailable — debate still counts as completed
           onFinish({
             outcome: "undetermined",
@@ -163,15 +208,22 @@ export function DebateFlow({
         }
       } else {
         setPhase("opponent");
+        logger.info("debate_flow.opponent_turn_rendered", { turnNumber });
       }
-    } catch {
+    } catch (err: any) {
+      logger.error("debate_flow.submit_turn_failed", { turnNumber, requestId: err?.requestId }, err);
       setTurnError("Couldn't send that turn. Try again.");
       setPhase("reviewing-clip");
     }
   }
 
   function nextTurn() {
+    audioPlayerRef.current?.pause();
+    audioPlayerRef.current = null;
+    setIsPlayingAudio(false);
     setOpponentLine(null);
+    setOpponentAudioAvailable(false);
+    setOpponentAudioUrl(null);
     setClip(null);
     setTurnText(null);
     setTurnNumber((n) => Math.min(n + 1, total));
@@ -286,14 +338,14 @@ export function DebateFlow({
             <motion.section key="opponent" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-1 flex-col">
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-coral">Rebutio responds</p>
               <div className="relative rounded-3xl rounded-bl-lg bg-white p-5 shadow-[0_6px_24px_rgba(34,39,31,0.08)]">
-                <p className="font-display text-[1.05rem] font-semibold leading-relaxed">{opponentLine ?? "…"}</p>
+                <OpponentResponseText text={opponentLine ?? "…"} />
                 {opponentAudioAvailable && (
                   <button
-                    onClick={playOpponentAudio}
+                    onClick={toggleOpponentAudio}
                     className="mt-4 flex items-center gap-2 rounded-full bg-coral-soft px-4 py-2 text-sm font-semibold text-coral transition-colors hover:bg-coral-soft/80"
-                    aria-label="Play opponent audio"
+                    aria-label={isPlayingAudio ? "Pause opponent audio" : "Play opponent audio"}
                   >
-                    <span aria-hidden>{isPlayingAudio ? "⏸" : "▶"}</span> {isPlayingAudio ? "Playing…" : "Play response"}
+                    <span aria-hidden>{isPlayingAudio ? "⏸" : "▶"}</span> {isPlayingAudio ? "Pause response" : "Play response"}
                   </button>
                 )}
               </div>
@@ -319,6 +371,57 @@ export function DebateFlow({
           {phase === "reviewing" && <ReviewingState slow={slowResponse} key="reviewing" />}
         </AnimatePresence>
       </div>
+    </div>
+  );
+}
+
+function OpponentResponseText({ text }: { text: string }) {
+  const textId = useId();
+  const textRef = useRef<HTMLParagraphElement | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [canExpand, setCanExpand] = useState(false);
+
+  useLayoutEffect(() => {
+    const element = textRef.current;
+    if (!element || expanded) return;
+
+    const measureOverflow = () => {
+      setCanExpand(element.scrollHeight > element.clientHeight + 1);
+    };
+
+    measureOverflow();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measureOverflow);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [expanded, text]);
+
+  return (
+    <div>
+      <p
+        id={textId}
+        ref={textRef}
+        tabIndex={expanded ? 0 : undefined}
+        aria-label={expanded ? "Rebutio response. Scroll to read the full response." : undefined}
+        className={`font-display text-[1.05rem] font-semibold leading-relaxed [overflow-wrap:anywhere] ${
+          expanded
+            ? "max-h-56 overflow-y-auto overscroll-contain pe-2 [scrollbar-color:var(--color-coral)_transparent] [scrollbar-width:thin]"
+            : "overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:5]"
+        }`}
+      >
+        {text}
+      </p>
+      {canExpand && (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          aria-controls={textId}
+          aria-expanded={expanded}
+          className="mt-3 text-sm font-semibold text-coral underline decoration-coral/35 underline-offset-4 transition-colors hover:text-ink"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
     </div>
   );
 }

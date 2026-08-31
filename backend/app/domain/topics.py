@@ -1,5 +1,6 @@
 import asyncio
-import logging
+import time
+import uuid
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +10,7 @@ from backend.app.domain.curriculum import (
     get_current_skill_for_user,
     get_skill,
 )
+from backend.app.observability.logging import get_logger
 from backend.app.persistence.repositories import (
     ProgressRepository,
     SpeechProfileRepository,
@@ -18,7 +20,7 @@ from backend.app.persistence.repositories import (
 from backend.app.prompts.topic_generator import build_topic_generator_prompt
 from backend.app.services.ai.gateway import ai_gateway
 
-logger = logging.getLogger("rebutio.topics")
+logger = get_logger("rebutio.topics")
 
 
 class TopicInventoryService:
@@ -98,6 +100,15 @@ class TopicInventoryService:
         """
         Background task to refill topic inventory without blocking UI responses.
         """
+        task_id = f"task-refill-{uuid.uuid4().hex[:6]}"
+        t_start = time.perf_counter()
+        logger.info(
+            "background_task.started",
+            task_type="topic_inventory_refill",
+            task_id=task_id,
+            user_id=user_id,
+        )
+
         from backend.app.persistence.db import async_session_factory
         try:
             async with async_session_factory() as db:
@@ -117,6 +128,13 @@ class TopicInventoryService:
 
                 needed = max(1, settings.INVENTORY_TARGET_COUNT - len(current_topics))
                 interests = prefs.get("interests", [])
+
+                logger.info(
+                    "topic_generation.started",
+                    user_id=user_id,
+                    target_skill=skill.id,
+                    needed_count=needed,
+                )
 
                 messages = build_topic_generator_prompt(
                     skill_id=skill.id,
@@ -144,6 +162,29 @@ class TopicInventoryService:
 
                 if to_insert:
                     await topic_repo.add_topics(user_id, to_insert)
-                    logger.info(f"Refilled {len(to_insert)} debate topics for user {user_id}")
+                    dur_ms = round((time.perf_counter() - t_start) * 1000, 2)
+                    logger.info(
+                        "topic_generation.completed",
+                        user_id=user_id,
+                        generated_count=len(to_insert),
+                        duration_ms=dur_ms,
+                    )
+
+            dur_ms = round((time.perf_counter() - t_start) * 1000, 2)
+            logger.info(
+                "background_task.completed",
+                task_type="topic_inventory_refill",
+                task_id=task_id,
+                user_id=user_id,
+                duration_ms=dur_ms,
+            )
         except Exception as e:
-            logger.warning(f"Background topic refill failed: {e}")
+            dur_ms = round((time.perf_counter() - t_start) * 1000, 2)
+            logger.error(
+                "background_task.failed",
+                task_type="topic_inventory_refill",
+                task_id=task_id,
+                user_id=user_id,
+                duration_ms=dur_ms,
+                exception_type=e.__class__.__name__,
+            )

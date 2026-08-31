@@ -17,6 +17,7 @@ dependencies = [
     "modal>=0.66.0",
     "cryptography>=43.0.0",
     "python-multipart>=0.0.12",
+    "structlog>=24.0.0",
 ]
 
 [project.optional-dependencies]
@@ -29,3 +30,4 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = [".", ".."]

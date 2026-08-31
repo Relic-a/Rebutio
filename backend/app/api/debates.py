@@ -14,6 +14,8 @@ from backend.app.models.schemas import (
     StartDebateRequestSchema,
     StartDebateResponseSchema,
 )
+from backend.app.observability.context import bind_context
+from backend.app.observability.logging import get_logger
 from backend.app.persistence.db import get_db
 from backend.app.persistence.repositories import (
     DebateSessionRepository,
@@ -22,6 +24,7 @@ from backend.app.persistence.repositories import (
     UserRepository,
 )
 
+logger = get_logger("rebutio.debates")
 router = APIRouter(prefix="/api/debates", tags=["debates"])
 
 
@@ -52,22 +55,45 @@ async def start_debate(
     if req.topicId:
         topic_record = await topic_repo.get_topic_by_id(user.id, req.topicId)
 
-    if topic_record:
+    if req.onboarding:
+        from backend.app.api.onboarding import FIRST_SPAR_TOPICS_BY_INTEREST
+        user_prefs = user_repo.get_preferences(user) or {}
+        interests = req.interests or user_prefs.get("interests", [])
+        matched_key = next((i for i in interests if i in FIRST_SPAR_TOPICS_BY_INTEREST), "tech")
+        topic_id, topic_text, skill_id = FIRST_SPAR_TOPICS_BY_INTEREST.get(
+            matched_key, ("social-media", "Social media has made friendships worse.", "counterpoint")
+        )
+        skill = get_skill(skill_id)
+        difficulty = "gentle"
+        turns = 3
+        reminder = skill.reminder
+    elif topic_record:
         topic_id = topic_record.topic_id
         topic_text = topic_record.topic_text
         skill = get_skill(topic_record.skill_id)
         difficulty = topic_record.difficulty
-        turns = 3 if req.onboarding else topic_record.turns
+        turns = topic_record.turns
         reminder = topic_record.reminder or skill.reminder
         await topic_repo.mark_consumed(user.id, topic_record.topic_id)
     else:
-        # Generate or pick from default skill
-        skill = default_skill
-        topic_id = req.topicId or f"topic-{uuid.uuid4().hex[:6]}"
-        topic_text = "College is no longer worth the cost." if not req.topicId else req.topicId
-        difficulty = skill.default_difficulty
-        turns = 3 if req.onboarding else skill.default_turns
-        reminder = skill.reminder
+        # Check if topic available in inventory
+        available = await topic_repo.get_available_topics(user.id, limit=1)
+        if available:
+            inv_t = available[0]
+            topic_id = inv_t.topic_id
+            topic_text = inv_t.topic_text
+            skill = get_skill(inv_t.skill_id)
+            difficulty = inv_t.difficulty
+            turns = inv_t.turns
+            reminder = inv_t.reminder or skill.reminder
+            await topic_repo.mark_consumed(user.id, inv_t.topic_id)
+        else:
+            skill = default_skill
+            topic_id = req.topicId or f"topic-{uuid.uuid4().hex[:6]}"
+            topic_text = "College is no longer worth the financial cost." if not req.topicId else req.topicId
+            difficulty = skill.default_difficulty
+            turns = skill.default_turns
+            reminder = skill.reminder
 
     session_id = f"session-{uuid.uuid4().hex[:8]}"
 
@@ -83,6 +109,18 @@ async def start_debate(
         difficulty=difficulty,
         user_side=req.side,
         total_user_turns=turns,
+    )
+
+    bind_context(session_id=session_id, user_id=user.id)
+    logger.info(
+        "debate.session.started",
+        session_id=session_id,
+        topic_id=topic_id,
+        skill_id=skill.id,
+        user_side=req.side,
+        total_turns=turns,
+        difficulty=difficulty,
+        onboarding=req.onboarding,
     )
 
     session_schema = DebateSessionSchema(

@@ -120,3 +120,33 @@ async def test_bootstrap_and_onboarding_flow():
         assert settings_resp.status_code == 200
         assert settings_resp.json()["saveTranscripts"] is True
         assert settings_resp.json()["intensity"] == "bring_it_on"
+
+        # 12. History List & Deletion
+        history_resp = await client.get("/api/settings/history")
+        assert history_resp.status_code == 200
+        history_items = history_resp.json()
+        assert len(history_items) >= 1
+        assert history_items[0]["sessionId"] == session_id
+
+        del_hist_resp = await client.delete("/api/settings/history")
+        assert del_hist_resp.status_code == 200
+        assert del_hist_resp.json()["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_oversized_audio_upload_rejection():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/api/debates/start", json={"side": "agree"})
+        session_id = resp.json()["session"]["id"]
+
+        # Create dummy oversized payload (> 25MB)
+        oversized_payload = b"0" * (26 * 1024 * 1024)
+        files = {"audio": ("huge.webm", oversized_payload, "audio/webm")}
+
+        turn_resp = await client.post(
+            f"/api/sessions/{session_id}/turns",
+            files=files,
+        )
+        assert turn_resp.status_code == 400
+        assert "25MB" in turn_resp.json()["detail"]
+

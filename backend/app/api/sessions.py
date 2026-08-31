@@ -21,12 +21,15 @@ from backend.app.models.schemas import (
     DebateTurnSchema,
     SubmitTurnResponseSchema,
 )
+from backend.app.observability.context import bind_context
+from backend.app.observability.logging import get_logger
 from backend.app.persistence.db import get_db
 from backend.app.persistence.repositories import DebateSessionRepository
 from backend.app.services.ai.gateway import ai_gateway
 from backend.app.services.privacy.encryption import encryptor
 from backend.app.services.tts.cache import tts_cache
 
+logger = get_logger("rebutio.sessions")
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
@@ -39,6 +42,7 @@ async def get_session(
     """
     Session Resumability: returns active or completed session state with already-completed turns.
     """
+    bind_context(session_id=session_id, user_id=user.id)
     sess_repo = DebateSessionRepository(db)
     sess = await sess_repo.get_session(session_id)
     if not sess or sess.user_id != user.id:
@@ -88,6 +92,7 @@ async def submit_turn(
     Accepts raw user audio bytes or text for the turn.
     Fans out MAI transcription and Modal phoneme processing concurrently.
     """
+    bind_context(session_id=session_id, user_id=user.id, turn_id=turn_index)
     sess_repo = DebateSessionRepository(db)
     session = await sess_repo.get_session(session_id)
     if not session or session.user_id != user.id:
@@ -96,13 +101,45 @@ async def submit_turn(
     if session.status == "finished":
         raise HTTPException(status_code=400, detail="Debate session is already finished")
 
+    ALLOWED_FORMATS = {"webm", "wav", "mp4", "m4a", "ogg", "mp3", "aac"}
+    MAX_AUDIO_BYTES = 25 * 1024 * 1024  # 25MB limit
+
     audio_bytes = None
     if audio:
         audio_bytes = await audio.read()
+        if len(audio_bytes) > MAX_AUDIO_BYTES:
+            logger.warning("audio.upload_rejected", reason="exceeds_25mb_limit", size_bytes=len(audio_bytes))
+            raise HTTPException(status_code=400, detail="Audio file exceeds 25MB limit")
 
-    fmt = audio_format or "webm"
+    fmt = (audio_format or "webm").lower().strip(".")
     if audio and audio.filename and "." in audio.filename:
-        fmt = audio.filename.rsplit(".", 1)[-1].lower()
+        ext = audio.filename.rsplit(".", 1)[-1].lower()
+        if ext in ALLOWED_FORMATS:
+            fmt = ext
+
+    if fmt not in ALLOWED_FORMATS:
+        fmt = "webm"
+
+    # Idempotency check: if turn_index is less than current turn, return already saved turn
+    if turn_index is not None and turn_index < session.current_turn:
+        logger.info(
+            "debate.turn.retry_detected",
+            session_id=session_id,
+            requested_turn=turn_index,
+            current_turn=session.current_turn,
+        )
+        user_t = next((t for t in session.turns if t.turn_number == turn_index and t.speaker == "user"), None)
+        opp_t = next((t for t in session.turns if t.turn_number == turn_index and t.speaker == "opponent"), None)
+        if user_t:
+            u_txt = encryptor.decrypt_str(user_t.text_encrypted) if user_t.text_encrypted else None
+            o_txt = encryptor.decrypt_str(opp_t.text_encrypted) if opp_t and opp_t.text_encrypted else None
+            o_audio = f"/api/sessions/{session_id}/turns/{opp_t.id}/audio" if opp_t else None
+            return SubmitTurnResponseSchema(
+                userTurn=DebateTurnSchema(id=user_t.id, speaker="user", text=u_txt, playback={"available": user_t.audio_available}),
+                opponentTurn=DebateTurnSchema(id=opp_t.id, speaker="opponent", text=o_txt, playback={"available": True, "audioUrl": o_audio}) if opp_t else None,
+                nextUserTurnNumber=session.current_turn,
+                finished=(session.status == "finished"),
+            )
 
     delay_ms = client_response_delay_ms or 0
 
@@ -128,11 +165,13 @@ async def observe_session_events(
     Server-Sent Events (SSE) endpoint providing semantic lifecycle events:
     session.started, user.turn_submitted, opponent.thinking, opponent.turn_ready, review.ready.
     """
+    bind_context(session_id=session_id, user_id=user.id)
     sess_repo = DebateSessionRepository(db)
     session = await sess_repo.get_session(session_id)
     if not session or session.user_id != user.id:
         raise HTTPException(status_code=404, detail="Debate session not found")
 
+    logger.debug("event_stream.connected", session_id=session_id)
     queue = session_events.subscribe(session_id)
 
     async def event_generator():
@@ -143,6 +182,7 @@ async def observe_session_events(
                 data = await queue.get()
                 yield f"data: {data}\n\n"
         except asyncio.CancelledError:
+            logger.debug("event_stream.disconnected", session_id=session_id)
             session_events.unsubscribe(session_id, queue)
 
     return StreamingResponse(
@@ -167,10 +207,14 @@ async def get_turn_audio(
     Plays ephemeral synthesized opponent audio.
     Regenerates on demand if cache expired.
     """
+    bind_context(session_id=session_id, user_id=user.id, turn_id=turn_id)
     audio_bytes = tts_cache.get(session_id, turn_id)
     if audio_bytes:
-        return Response(content=audio_bytes, media_type="audio/mp3")
+        logger.debug("debate.tts.cache_hit", session_id=session_id, turn_id=turn_id)
+        media_type = "audio/wav" if audio_bytes.startswith(b"RIFF") else "audio/mpeg"
+        return Response(content=audio_bytes, media_type=media_type)
 
+    logger.info("debate.tts.cache_miss_regenerating", session_id=session_id, turn_id=turn_id)
     # If missing from cache, check if opponent turn text exists in DB to re-synthesize
     sess_repo = DebateSessionRepository(db)
     session = await sess_repo.get_session(session_id)
@@ -180,8 +224,10 @@ async def get_turn_audio(
             txt = encryptor.decrypt_str(turn.text_encrypted)
             if txt:
                 audio_bytes = await ai_gateway.synthesize_speech(txt)
-                tts_cache.put(session_id, turn_id, audio_bytes)
-                return Response(content=audio_bytes, media_type="audio/mp3")
+                if audio_bytes:
+                    tts_cache.put(session_id, turn_id, audio_bytes)
+                    media_type = "audio/wav" if audio_bytes.startswith(b"RIFF") else "audio/mpeg"
+                    return Response(content=audio_bytes, media_type=media_type)
 
     raise HTTPException(status_code=404, detail="Audio not found")
 
@@ -192,6 +238,7 @@ async def finish_session(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    bind_context(session_id=session_id, user_id=user.id)
     sess_repo = DebateSessionRepository(db)
     session = await sess_repo.get_session(session_id)
     if not session or session.user_id != user.id:

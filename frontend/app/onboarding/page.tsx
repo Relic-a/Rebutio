@@ -13,6 +13,7 @@ import { DebateFlow } from "@/components/debate/DebateFlow";
 import { appService } from "@/lib/api";
 import { onboardingOptions } from "@/lib/mock/fixtures";
 import { capture } from "@/lib/media/capture";
+import { logger } from "@/lib/logger";
 import { useStore } from "@/lib/state/store";
 import type { DebateReview, DebateSession, DebateSetup } from "@/lib/types";
 
@@ -55,8 +56,17 @@ export default function OnboardingPage() {
   }
 
   async function startSpar(side: "agree" | "disagree") {
-    // Session is prepared first; mic permission is requested only after
-    // the user commits to debating (step 7), never on app launch.
+    // Save preferences to backend and prepare session
+    try {
+      await appService.saveOnboardingPreferences({
+        goals,
+        comfort,
+        interests,
+        intensity,
+      });
+    } catch (e) {
+      logger.warn("onboarding.persist_preferences_failed", { error: (e as any)?.message });
+    }
     const s = await appService.startDebate({ side, onboarding: true, interests });
     setPendingSession(s);
     capture.checkAvailability().then((avail) => {

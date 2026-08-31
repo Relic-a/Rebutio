@@ -105,7 +105,7 @@ class StartDebateResponseSchema(BaseModel):
 
 class SubmitTurnResponseSchema(BaseModel):
     userTurn: DebateTurnSchema
-    opponentTurn: DebateTurnSchema
+    opponentTurn: Optional[DebateTurnSchema] = None
     nextUserTurnNumber: int
     finished: bool
 
@@ -199,6 +199,23 @@ class SettingsUpdateSchema(BaseModel):
     saveTranscripts: Optional[bool] = None
     captionsEnabled: Optional[bool] = None
     intensity: Optional[Literal["easygoing", "balanced", "bring_it_on"]] = None
+
+
+class DebateHistoryItemSchema(BaseModel):
+    sessionId: str
+    topic: str
+    skillName: str
+    difficulty: str
+    outcome: str
+    stars: int
+    createdAt: str
+    transcriptsSaved: bool
+
+
+class DebateHistoryDetailSchema(BaseModel):
+    session: DebateSessionSchema
+    review: Optional[DebateReviewSchema] = None
+    transcriptsSaved: bool
 
 
 # ---------------------------------------------------------------------------

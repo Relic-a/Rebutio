@@ -22,6 +22,7 @@ import {
   mockProgressStats,
   type DebateTopicFixture,
 } from "@/lib/mock/fixtures";
+import { logger } from "@/lib/logger";
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -53,7 +54,7 @@ export type AppService = {
     turn?: { audio?: Blob; transcript?: string; clientResponseDelayMs?: number }
   ): Promise<{
     userTurn: DebateSession["turns"][number];
-    opponentTurn: DebateSession["turns"][number];
+    opponentTurn?: DebateSession["turns"][number] | null;
     nextUserTurnNumber: number;
     finished: boolean;
   }>;
@@ -74,21 +75,37 @@ export function createHttpService(baseUrl: string = ""): AppService {
 
   async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const url = `${apiBase}${path}`;
-    const res = await fetch(url, {
-      ...options,
-      credentials: "include",
-      headers: {
-        Accept: "application/json",
-        ...options.headers,
-      },
-    });
+    try {
+      const res = await fetch(url, {
+        ...options,
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          ...options.headers,
+        },
+      });
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(`API error ${res.status}: ${errText || res.statusText}`);
+      const reqId = res.headers.get("x-request-id");
+      if (reqId) {
+        logger.setRequestId(reqId);
+      }
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        logger.error("api.request.failed", { path, status: res.status, requestId: reqId }, new Error(errText || res.statusText));
+        const error = new Error(`API error ${res.status}: ${errText || res.statusText}`);
+        (error as any).requestId = reqId;
+        (error as any).status = res.status;
+        throw error;
+      }
+
+      return res.json();
+    } catch (e: any) {
+      if (!e.requestId && logger.getRequestId()) {
+        e.requestId = logger.getRequestId();
+      }
+      throw e;
     }
-
-    return res.json();
   }
 
   return {
@@ -146,9 +163,18 @@ export function createHttpService(baseUrl: string = ""): AppService {
         credentials: "include",
       });
 
+      const reqId = res.headers.get("x-request-id");
+      if (reqId) {
+        logger.setRequestId(reqId);
+      }
+
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
-        throw new Error(`Turn submission failed: ${errText || res.statusText}`);
+        logger.error("api.turn_submission.failed", { sessionId: session.id, status: res.status, requestId: reqId }, new Error(errText || res.statusText));
+        const error = new Error(`Turn submission failed: ${errText || res.statusText}`);
+        (error as any).requestId = reqId;
+        (error as any).status = res.status;
+        throw error;
       }
 
       const data = await res.json();
@@ -177,11 +203,13 @@ export function createHttpService(baseUrl: string = ""): AppService {
         };
 
         es.onerror = () => {
+          logger.warn("event_stream.closed", { sessionId });
           es.close();
         };
 
         return () => es.close();
-      } catch {
+      } catch (err) {
+        logger.error("event_stream.init_failed", { sessionId }, err);
         return () => {};
       }
     },
@@ -274,7 +302,7 @@ export function createMockService(): AppService {
       const finished = session.currentTurn >= session.totalUserTurns;
       return {
         userTurn,
-        opponentTurn,
+        opponentTurn: finished ? undefined : opponentTurn,
         nextUserTurnNumber: Math.min(session.currentTurn + 1, session.totalUserTurns),
         finished,
       };
