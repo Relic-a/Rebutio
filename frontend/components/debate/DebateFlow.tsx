@@ -8,7 +8,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { appService, noteCurrentSession } from "@/lib/api";
 import { capture } from "@/lib/media/capture";
 import { logger } from "@/lib/logger";
-import type { DebateReview, DebateSession, DebateSetup } from "@/lib/types";
+import type { DebateReview, DebateSession, DebateSetup, Speaker } from "@/lib/types";
 
 type Phase =
   | "turn" // user's turn, mic ready
@@ -44,10 +44,15 @@ export function DebateFlow({
   const [micDenied, setMicDenied] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [reviewBeforeSend, setReviewBeforeSend] = useState(true);
+  const [transcript, setTranscript] = useState<{ speaker: Speaker; text: string }[]>(() =>
+    (session.turns ?? []).filter((t) => t.text).map((t) => ({ speaker: t.speaker, text: t.text as string }))
+  );
   const opponentReadyTimestampRef = useRef<number>(Date.now());
   const delayMsRef = useRef<number>(0);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const autoAdvanceTimerRef = useRef<number | null>(null);
+  const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
+  const turnTranscriptScrollRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<DebateSession>(session);
   noteCurrentSession(session);
 
@@ -76,6 +81,13 @@ export function DebateFlow({
     const iv = setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => clearInterval(iv);
   }, [phase]);
+
+  // Keep the exchange pinned to the latest line wherever the transcript is shown.
+  useEffect(() => {
+    for (const el of [transcriptScrollRef.current, turnTranscriptScrollRef.current]) {
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  }, [phase, transcript]);
 
   function clearAutoAdvance() {
     if (autoAdvanceTimerRef.current !== null) {
@@ -216,6 +228,10 @@ export function DebateFlow({
         ...sessionRef.current,
         turns: [...sessionRef.current.turns, ...turnsToAdd],
       };
+      setTranscript((prev) => [
+        ...prev,
+        ...turnsToAdd.filter((t) => t.text).map((t) => ({ speaker: t.speaker, text: t.text as string })),
+      ]);
       if (res.opponentTurn) {
         setOpponentLine(res.opponentTurn.text ?? null);
         setOpponentAudioAvailable(Boolean(res.opponentTurn.playback?.available));
@@ -310,6 +326,18 @@ export function DebateFlow({
                 <p className="mt-1 text-sm text-ink-soft">{session.skillReminder}</p>
               </div>
 
+              {transcript.length > 0 && (
+                <div
+                  ref={turnTranscriptScrollRef}
+                  className="mb-5 flex max-h-44 flex-col gap-2 overflow-y-auto pe-1"
+                  aria-label="Debate so far"
+                >
+                  {transcript.slice(-6).map((m, i) => (
+                    <TranscriptBubble key={i} speaker={m.speaker} text={m.text} />
+                  ))}
+                </div>
+              )}
+
               {micDenied && (
                 <div role="alert" className="mb-4 rounded-2xl bg-coral-soft px-4 py-3 text-sm font-medium text-coral">
                   Microphone unavailable. Make your point in text instead — the debate continues the same way.
@@ -388,17 +416,22 @@ export function DebateFlow({
           {phase === "opponent" && (
             <motion.section key="opponent" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-1 flex-col">
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-coral">Rebutio responds</p>
-              <div className="relative rounded-3xl rounded-bl-lg bg-white p-5 shadow-[0_6px_24px_rgba(34,39,31,0.08)]">
-                <OpponentResponseText text={opponentLine ?? "…"} />
-                {opponentAudioAvailable && (
-                  <button
-                    onClick={toggleOpponentAudio}
-                    className="mt-4 flex items-center gap-2 rounded-full bg-coral-soft px-4 py-2 text-sm font-semibold text-coral transition-colors hover:bg-coral-soft/80"
-                    aria-label={isPlayingAudio ? "Pause opponent audio" : "Play opponent audio"}
-                  >
-                    <span aria-hidden>{isPlayingAudio ? "⏸" : "▶"}</span> {isPlayingAudio ? "Pause response" : "Play response"}
-                  </button>
-                )}
+              <div ref={transcriptScrollRef} className="flex max-h-[62dvh] flex-col gap-2 overflow-y-auto pe-1">
+                {transcript.slice(0, -1).slice(-5).map((m, i) => (
+                  <TranscriptBubble key={i} speaker={m.speaker} text={m.text} />
+                ))}
+                <div className="relative self-start rounded-3xl rounded-bl-lg bg-white p-5 shadow-[0_6px_24px_rgba(34,39,31,0.08)]">
+                  <OpponentResponseText text={opponentLine ?? "…"} />
+                  {opponentAudioAvailable && (
+                    <button
+                      onClick={toggleOpponentAudio}
+                      className="mt-4 flex items-center gap-2 rounded-full bg-coral-soft px-4 py-2 text-sm font-semibold text-coral transition-colors hover:bg-coral-soft/80"
+                      aria-label={isPlayingAudio ? "Pause opponent audio" : "Play opponent audio"}
+                    >
+                      <span aria-hidden>{isPlayingAudio ? "⏸" : "▶"}</span> {isPlayingAudio ? "Pause response" : "Play response"}
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="mt-6 flex flex-1 flex-col items-center justify-end gap-4 pb-2">
                 <p className="text-sm font-medium text-ink-soft">{lastTurn ? "Prepare your closing argument." : "Prepare your rebuttal."}</p>
@@ -422,6 +455,21 @@ export function DebateFlow({
           {phase === "reviewing" && <ReviewingState slow={slowResponse} key="reviewing" />}
         </AnimatePresence>
       </div>
+    </div>
+  );
+}
+
+function TranscriptBubble({ speaker, text }: { speaker: Speaker; text: string }) {
+  const isUser = speaker === "user";
+  return (
+    <div
+      className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+        isUser
+          ? "self-end rounded-br-md bg-rally-mist text-rally-deep"
+          : "self-start rounded-bl-md bg-white/85 text-ink-soft shadow-[0_2px_10px_rgba(34,39,31,0.05)]"
+      }`}
+    >
+      {text}
     </div>
   );
 }
