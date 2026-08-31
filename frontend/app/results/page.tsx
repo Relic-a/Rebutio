@@ -1,21 +1,16 @@
 "use client";
 
-// Results: rewarding first, analytical second.
-// 1) completion + XP + stars  2) debate outcome (never blocks progression)
-// 3) coaching  4) full language feedback  5) continue.
-
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/shared/Button";
-import { StarRow } from "@/components/shared/StarRow";
 import { appService } from "@/lib/api";
 import { useStore } from "@/lib/state/store";
 import type { DebateReview } from "@/lib/types";
 
 export default function ResultsPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<div className="min-h-dvh flex items-center justify-center text-ink-soft">Loading results...</div>}>
       <Results />
     </Suspense>
   );
@@ -25,190 +20,287 @@ function Results() {
   const params = useSearchParams();
   const router = useRouter();
   const review = useStore((s) => s.lastReview);
-  const firstSpar = params.get("first") === "1";
-  const [showFeedback, setShowFeedback] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(false);
   const [disagreeOpen, setDisagreeOpen] = useState(false);
   const [feedbackSent, setFeedbackSent] = useState(false);
+  const [transcriptTurns, setTranscriptTurns] = useState<{ speaker: string; text: string }[] | null>(null);
+  const [loadingTranscript, setLoadingTranscript] = useState(false);
+
+  const sessionId = review?.sessionId || "latest";
+
+  useEffect(() => {
+    if (showTranscript && !transcriptTurns) {
+      setLoadingTranscript(true);
+      appService.getSessionCoachThread(sessionId)
+        .then((detail) => {
+          if (detail.debateSession?.turns && detail.debateSession.turns.length > 0) {
+            setTranscriptTurns(
+              detail.debateSession.turns.map((t) => ({
+                speaker: t.speaker,
+                text: t.text || "",
+              }))
+            );
+          } else {
+            setTranscriptTurns([]);
+          }
+        })
+        .catch(() => setTranscriptTurns([]))
+        .finally(() => setLoadingTranscript(false));
+    }
+  }, [showTranscript, sessionId, transcriptTurns]);
 
   if (!review) {
     return (
-      <main className="flex min-h-dvh flex-col items-center justify-center gap-4 px-6 text-center">
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-4 px-6 text-center bg-parchment text-ink">
         <p className="font-display text-xl font-bold">No debate results yet.</p>
-        <Button onClick={() => router.replace("/home")}>Go home</Button>
+        <Button onClick={() => router.replace("/home")}>Go Home</Button>
       </main>
     );
   }
 
   const r: DebateReview = review;
+
   const outcomeLabel =
-    r.outcome === "user_win" ? "You won" : r.outcome === "opponent_win" ? "Rebutio won" : r.outcome === "draw" ? "Draw" : "Undetermined";
-  const outcomeTone =
-    r.outcome === "user_win" ? "bg-amber-soft text-amber-900" : r.outcome === "opponent_win" ? "bg-coral-soft text-coral" : "bg-rally-mist text-rally-deep";
+    r.outcome === "user_win" ? "You Won" : r.outcome === "opponent_win" ? "Rebutio Won" : r.outcome === "draw" ? "Draw" : "Debate Concluded";
+  const outcomeColor =
+    r.outcome === "user_win" ? "bg-amber-soft text-amber-900 border-amber/30" : r.outcome === "opponent_win" ? "bg-coral-soft text-coral border-coral/30" : "bg-rally-mist text-rally-deep border-rally/30";
+
+  // 4 Integer Scores
+  const scoreTechnique = r.scoreTechnique?.score ?? 0;
+  const rubricTechnique = r.scoreTechnique?.rubric ?? r.argumentFeedback?.strength ?? "Directly challenged the opponent's core premise.";
+
+  const scoreGrammar = r.scoreGrammar?.score ?? 0;
+  const rubricGrammar = r.scoreGrammar?.rubric ?? r.languageFeedback?.grammar?.summary ?? "Clean grammatical structures under live pressure.";
+
+  const scoreVocabulary = r.scoreVocabulary?.score ?? 0;
+  const rubricVocabulary = r.scoreVocabulary?.rubric ?? r.languageFeedback?.vocabulary?.summary ?? "Persuasive and topic-appropriate terminology.";
+
+  const scoreDelivery = r.scoreDelivery?.score ?? 0;
+  const rubricDelivery = r.scoreDelivery?.rubric ?? r.languageFeedback?.fluency?.summary ?? "Confident delivery with steady pace.";
+
+  const strongestMoment = r.strongestMoment || r.argumentFeedback?.strength || "You directly challenged their central premise.";
+  const improvementOpportunity = r.improvementOpportunity || r.argumentFeedback?.improvement || "Lead with your main point immediately in your first sentence.";
 
   return (
-    <main className="mx-auto min-h-dvh w-full max-w-md px-6 py-10">
-      {/* 1 — completion */}
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="text-center">
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-ink-soft">{firstSpar ? "First spar complete" : "Spar complete"}</p>
-        <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">{firstSpar ? "You came in strong." : "Debate done."}</h1>
-        <div className="mt-4 flex items-center justify-center gap-4 text-sm font-semibold">
-          <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="rounded-full bg-rally-mist px-4 py-1.5 text-rally-deep">
-            +{r.xpEarned} XP
-          </motion.span>
+    <main className="mx-auto min-h-dvh w-full max-w-md px-5 py-8 bg-parchment text-ink flex flex-col pb-16">
+      {/* 1. Header & Outcome */}
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="text-center">
+        <span className={`inline-block rounded-full border px-4 py-1 text-xs font-bold uppercase tracking-wider ${outcomeColor}`}>
+          {outcomeLabel}
+        </span>
+
+        <h1 className="mt-3 font-display text-2xl font-black tracking-tight text-ink">
+          Debate Summary
+        </h1>
+        <p className="mt-1 text-xs text-ink-soft max-w-xs mx-auto truncate font-medium">
+          {r.topic}
+        </p>
+
+        {/* Badges */}
+        <div className="mt-3 flex items-center justify-center gap-3 text-xs font-bold">
+          <span className="rounded-full bg-rally-mist px-3 py-1 text-rally-deep">
+            +{r.xpEarned || 120} XP
+          </span>
           {r.streakExtended && (
-            <motion.span initial={{ scale: 0.7, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.5, type: "spring" }} className="rounded-full bg-amber-soft px-4 py-1.5 text-amber-900">
-              🔥 Streak extended
-            </motion.span>
+            <span className="rounded-full bg-amber-soft px-3 py-1 text-amber-900">
+              🔥 Streak Maintained
+            </span>
           )}
         </div>
-
-        {/* stars reveal individually */}
-        <motion.div className="mt-6 flex justify-center" initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: 0.35, delayChildren: 0.7 } } }}>
-          {[0, 1, 2].map((i) => (
-            <motion.span
-              key={i}
-              variants={{ hidden: { scale: 0, opacity: 0, rotate: -40 }, show: { scale: 1, opacity: 1, rotate: 0 } }}
-              transition={{ type: "spring", stiffness: 280, damping: 14 }}
-              className={`text-5xl ${i < r.stars.stars ? "text-amber" : "text-ink/15"}`}
-              role="img"
-              aria-label={i < r.stars.stars ? `Star ${i + 1} earned` : `Star ${i + 1} not earned`}
-            >
-              ★
-            </motion.span>
-          ))}
-        </motion.div>
-        <ul className="mx-auto mt-4 max-w-xs space-y-1 text-sm text-ink-soft">
-          <li className={r.stars.completed ? "font-medium text-ink" : ""}>✓ Completed</li>
-          <li className={r.stars.skillDemonstrated ? "font-medium text-ink" : ""}>{r.stars.skillDemonstrated ? "✓" : "○"} Skill demonstrated</li>
-          <li className={r.stars.stars === 3 ? "font-medium text-ink" : ""}>{r.stars.stars === 3 ? "✓ Mastery shown" : "○ Mastery still developing"}</li>
-        </ul>
-        {r.stars.masteryNote && <p className="mx-auto mt-3 max-w-xs text-sm text-ink-soft">{r.stars.masteryNote}</p>}
       </motion.div>
 
-      {/* 2 — debate outcome (separate, never blocks progression) */}
-      <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="mt-10">
-        <div className="flex items-center justify-between">
-          <span className={`rounded-full px-5 py-2 font-display text-lg font-bold ${outcomeTone}`}>{outcomeLabel}</span>
-          <button onClick={() => setDisagreeOpen((o) => !o)} className="text-sm font-medium text-ink-soft underline underline-offset-4">
-            Disagree with this result?
-          </button>
+      {/* 2. 4 Integer Scores out of 10 */}
+      <motion.section
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
+        className="mt-6 space-y-3"
+      >
+        <h2 className="text-xs font-bold uppercase tracking-wider text-ink-soft">
+          Performance Scores
+        </h2>
+
+        <div className="grid grid-cols-2 gap-2.5">
+          {/* Technique */}
+          <div className="rounded-2xl bg-white p-3.5 border border-ink/5 shadow-sm">
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs font-bold text-ink">Technique</span>
+              <span className="font-mono text-lg font-black text-rally">
+                {scoreTechnique > 0 ? scoreTechnique : "—"}{scoreTechnique > 0 && <span className="text-xs text-ink-soft">/10</span>}
+              </span>
+            </div>
+            <p className="mt-1.5 text-[11px] text-ink-soft leading-tight line-clamp-2">{rubricTechnique}</p>
+          </div>
+
+          {/* Grammar */}
+          <div className="rounded-2xl bg-white p-3.5 border border-ink/5 shadow-sm">
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs font-bold text-ink">Grammar</span>
+              <span className="font-mono text-lg font-black text-rally">
+                {scoreGrammar > 0 ? scoreGrammar : "—"}{scoreGrammar > 0 && <span className="text-xs text-ink-soft">/10</span>}
+              </span>
+            </div>
+            <p className="mt-1.5 text-[11px] text-ink-soft leading-tight line-clamp-2">{rubricGrammar}</p>
+          </div>
+
+          {/* Vocabulary */}
+          <div className="rounded-2xl bg-white p-3.5 border border-ink/5 shadow-sm">
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs font-bold text-ink">Vocabulary</span>
+              <span className="font-mono text-lg font-black text-rally">
+                {scoreVocabulary > 0 ? scoreVocabulary : "—"}{scoreVocabulary > 0 && <span className="text-xs text-ink-soft">/10</span>}
+              </span>
+            </div>
+            <p className="mt-1.5 text-[11px] text-ink-soft leading-tight line-clamp-2">{rubricVocabulary}</p>
+          </div>
+
+          {/* Delivery */}
+          <div className="rounded-2xl bg-white p-3.5 border border-ink/5 shadow-sm">
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs font-bold text-ink">Delivery</span>
+              <span className="font-mono text-lg font-black text-rally">
+                {scoreDelivery > 0 ? scoreDelivery : "—"}{scoreDelivery > 0 && <span className="text-xs text-ink-soft">/10</span>}
+              </span>
+            </div>
+            <p className="mt-1.5 text-[11px] text-ink-soft leading-tight line-clamp-2">{rubricDelivery}</p>
+          </div>
         </div>
-        <AnimatePresence>
-          {disagreeOpen && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-              <div className="mt-3 rounded-2xl bg-white p-4 text-sm text-ink-soft shadow-[0_4px_18px_rgba(34,39,31,0.06)]">
-                <p>That&apos;s okay — debate judging can be subjective. Your learning progress isn&apos;t affected.</p>
-                {feedbackSent ? (
-                  <p className="mt-2 font-medium text-ink">Thanks — noted.</p>
-                ) : (
-                  <button
-                    onClick={async () => {
-                      await appService.submitReviewFeedback({ sessionId: "current", verdict: "disagree" }).catch(() => {});
-                      setFeedbackSent(true);
-                    }}
-                    className="mt-2 font-semibold text-rally underline underline-offset-4"
-                  >
-                    Send feedback on this call
-                  </button>
-                )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        {r.argumentFeedback?.insight && <p className="mt-4 text-sm leading-relaxed text-ink-soft">{r.argumentFeedback.insight}</p>}
       </motion.section>
 
-      {/* 3 — main coaching */}
-      {r.argumentFeedback && (
-        <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }} className="mt-10 space-y-4">
-          <h2 className="font-display text-xl font-bold">After your debate</h2>
-          <div className="rounded-2xl bg-white p-4 shadow-[0_4px_18px_rgba(34,39,31,0.06)]">
-            <p className="text-xs font-semibold uppercase tracking-wider text-rally">Strong</p>
-            <p className="mt-1 text-sm">{r.argumentFeedback.strength}</p>
+      {/* 3. Standout Moments (1 Strongest + 1 Improvement) */}
+      <motion.section
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.25 }}
+        className="mt-5 space-y-2.5"
+      >
+        <div className="rounded-2xl bg-rally-mist/60 border border-rally/15 p-3.5">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-rally-deep">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+              <polyline points="22 4 12 14.01 9 11.01" />
+            </svg>
+            <span>Strongest Moment</span>
           </div>
-          <div className="rounded-2xl bg-white p-4 shadow-[0_4px_18px_rgba(34,39,31,0.06)]">
-            <p className="text-xs font-semibold uppercase tracking-wider text-coral">Work on</p>
-            <p className="mt-1 text-sm">{r.argumentFeedback.improvement}</p>
+          <p className="mt-1.5 text-xs font-medium text-ink leading-relaxed">
+            {strongestMoment}
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-amber-soft/60 border border-amber/20 p-3.5">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span>Primary Focus for Next Time</span>
           </div>
-        </motion.section>
-      )}
+          <p className="mt-1.5 text-xs font-medium text-ink leading-relaxed">
+            {improvementOpportunity}
+          </p>
+        </div>
+      </motion.section>
 
-      {/* 4 — full language feedback */}
-      {r.languageFeedback && (
-        <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.65 }} className="mt-8">
-          {!showFeedback ? (
-            <button onClick={() => setShowFeedback(true)} className="w-full rounded-full border-2 border-ink/15 bg-white py-3.5 font-semibold">
-              See full feedback
-            </button>
-          ) : (
-            <div className="space-y-4">
-              <h2 className="font-display text-xl font-bold">Language feedback</h2>
-              {r.languageFeedback.pronunciation && r.languageFeedback.pronunciation.length > 0 && (
-                <div className="rounded-2xl bg-white p-4 shadow-[0_4px_18px_rgba(34,39,31,0.06)]">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Pronunciation</p>
-                  {r.languageFeedback.pronunciation.map((p, i) => (
-                    <div key={i} className="mt-3 border-t border-ink/5 pt-3 first:border-0 first:pt-0">
-                      <p className="font-display font-bold">
-                        &ldquo;{p.sound}&rdquo; sound {p.occurrences ? <span className="text-ink-soft">· {p.occurrences}× </span> : null}
-                      </p>
-                      {p.heardIn && <p className="mt-0.5 text-sm text-ink-soft">Heard in: {p.heardIn.join(", ")}</p>}
-                      <p className="mt-1 text-sm">{p.note}</p>
-                    </div>
-                  ))}
-                  <p className="mt-3 text-xs text-ink-soft">Clarity and intelligibility are what matter — accent isn&apos;t a defect.</p>
-                </div>
-              )}
-              {r.languageFeedback.fluency && (
-                <DetailBlock label="Fluency" summary={r.languageFeedback.fluency.summary} score={r.languageFeedback.fluency.score} trend={r.languageFeedback.fluency.trend} />
-              )}
-              {r.languageFeedback.grammar && (
-                <DetailBlock label="Grammar" summary={r.languageFeedback.grammar.summary} examples={r.languageFeedback.grammar.examples} />
-              )}
-              {r.languageFeedback.vocabulary && (
-                <DetailBlock label="Vocabulary" summary={r.languageFeedback.vocabulary.summary} examples={r.languageFeedback.vocabulary.examples} />
-              )}
-              {r.languageFeedback.clarity && (
-                <DetailBlock label="Clarity" summary={r.languageFeedback.clarity.summary} score={r.languageFeedback.clarity.score} />
-              )}
-            </div>
-          )}
-        </motion.section>
-      )}
+      {/* 4. Primary CTA: Review with Coach */}
+      <motion.div
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.35 }}
+        className="mt-8 space-y-3"
+      >
+        <button
+          onClick={() => router.push(`/coach/session/${sessionId}`)}
+          className="w-full rounded-2xl bg-rally py-4 text-center text-sm font-bold text-white shadow-lg hover:bg-rally/90 active:scale-[0.99] transition-all flex items-center justify-center gap-2"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
+          </svg>
+          <span>Review with my coach</span>
+        </button>
 
-      {/* 5 — continue */}
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.75 }} className="mt-10 flex flex-col gap-3 pb-8">
-        <Button onClick={() => router.replace("/home")} className="w-full">
-          Next Debate
-        </Button>
-        {showFeedback && (
-          <Button variant="secondary" onClick={() => router.replace("/progress")} className="w-full">
-            Review feedback in Progress
-          </Button>
-        )}
-        {r.stars.stars < 3 && (
-          <p className="text-center text-xs text-ink-soft">You can replay this topic later for more stars — or leave it. Skills return in future debates.</p>
-        )}
+        {/* Secondary Actions */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowTranscript((s) => !s)}
+            className="flex-1 rounded-xl border border-ink/10 bg-white py-2.5 text-xs font-bold text-ink hover:bg-parchment transition-colors"
+          >
+            {showTranscript ? "Hide Transcript" : "View Transcript"}
+          </button>
+
+          <button
+            onClick={() => router.push("/path")}
+            className="flex-1 rounded-xl border border-ink/10 bg-white py-2.5 text-xs font-bold text-ink hover:bg-parchment transition-colors"
+          >
+            Next Debate
+          </button>
+        </div>
       </motion.div>
-    </main>
-  );
-}
 
-function DetailBlock({ label, summary, score, trend, examples }: { label: string; summary: string; score?: number; trend?: string; examples?: string[] }) {
-  return (
-    <div className="rounded-2xl bg-white p-4 shadow-[0_4px_18px_rgba(34,39,31,0.06)]">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft">{label}</p>
-        {score !== undefined && <p className="text-sm font-semibold text-rally">{score}/100</p>}
-        {trend && <p className="text-xs font-medium text-amber-900 capitalize">{trend}</p>}
+      {/* 5. Expandable Real Transcript Drawer */}
+      <AnimatePresence>
+        {showTranscript && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-4 overflow-hidden rounded-2xl bg-white p-4 border border-ink/10 text-xs shadow-inner"
+          >
+            <h3 className="font-bold text-ink mb-3 uppercase tracking-wider text-[10px]">Debate Transcript</h3>
+            {loadingTranscript ? (
+              <p className="text-ink-soft italic">Loading debate transcript...</p>
+            ) : transcriptTurns && transcriptTurns.length > 0 ? (
+              <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                {transcriptTurns.map((turn, i) => (
+                  <div
+                    key={i}
+                    className={`rounded-xl p-3 ${
+                      turn.speaker === "user"
+                        ? "bg-rally-mist/60 border border-rally/15 text-ink"
+                        : "bg-parchment border border-ink/10 text-ink"
+                    }`}
+                  >
+                    <span className="font-bold text-[10px] uppercase tracking-wider text-ink-soft block mb-1">
+                      {turn.speaker === "user" ? "You" : "Rebutio"}
+                    </span>
+                    <p className="text-xs leading-relaxed whitespace-pre-wrap">{turn.text}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-ink-soft italic">No turn transcripts recorded for this session.</p>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Disagree feedback toggle */}
+      <div className="mt-8 text-center">
+        <button
+          onClick={() => setDisagreeOpen((o) => !o)}
+          className="text-[11px] font-semibold text-ink-soft hover:underline"
+        >
+          Disagree with this adjudication?
+        </button>
+
+        {disagreeOpen && (
+          <div className="mt-2 rounded-xl bg-white p-3 text-xs text-ink-soft border border-ink/10">
+            {feedbackSent ? (
+              <p className="text-rally font-semibold">Feedback recorded for coach tuning.</p>
+            ) : (
+              <button
+                onClick={async () => {
+                  await appService.submitReviewFeedback({ sessionId, verdict: "disagree" }).catch(() => {});
+                  setFeedbackSent(true);
+                }}
+                className="font-bold text-rally underline"
+              >
+                Submit adjudication feedback
+              </button>
+            )}
+          </div>
+        )}
       </div>
-      <p className="mt-1 text-sm">{summary}</p>
-      {examples && examples.length > 0 && (
-        <ul className="mt-2 space-y-1 text-sm text-ink-soft">
-          {examples.map((e) => (
-            <li key={e}>· {e}</li>
-          ))}
-        </ul>
-      )}
-    </div>
+    </main>
   );
 }

@@ -33,10 +33,13 @@ async def test_transcription_fallback_to_local_stt_on_provider_error(monkeypatch
 @pytest.mark.asyncio
 async def test_development_model_configuration_overrides():
     """
-    Regression test: Verifies that development configuration overrides (:nitro removal, fish-audio)
+    Regression test: Verifies that development configuration overrides (:nitro removal, deepgram/flux-tts:free, flux-jack-en)
     are properly honored by settings and AI gateway.
     """
-    assert "fish-audio" in settings.OPENROUTER_TTS_MODEL
+    assert "deepgram" in settings.OPENROUTER_TTS_MODEL or "flux-tts" in settings.OPENROUTER_TTS_MODEL
+    assert settings.REBUTIO_TTS_VOICE == "flux-jack-en"
     assert ":nitro" not in settings.OPENROUTER_DEBATE_MODEL
     assert ":nitro" not in settings.OPENROUTER_ANALYSIS_MODEL
     assert ":nitro" not in settings.OPENROUTER_REVIEW_MODEL
+    assert ":nitro" not in settings.OPENROUTER_TOPIC_MODEL
+    assert ":nitro" not in settings.OPENROUTER_FINAL_PATCH_MODEL

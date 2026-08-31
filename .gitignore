@@ -10,9 +10,15 @@ frontend/.env.local
 
 # Databases & SQLite
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 rebutio.db
+storage/
+backend/storage/
+test-results/
+frontend/test-results/
 
 # Python & Virtual Environments
 __pycache__/

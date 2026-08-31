@@ -203,11 +203,14 @@ class AIGateway:
         logger.warning("debate.tts.failed", duration_ms=dur_ms, reason="all_candidates_failed")
         return b""
 
-    async def generate_debate_response(self, messages: List[dict], current_turn: int = 1) -> str:
+    async def generate_debate_response(self, messages: List[dict], current_turn: int = 1) -> OpponentMoveResponse:
         """
         Generates Rebutio's next spoken debate argument using DeepSeek V4 Pro.
         Output is checked for prompt/instruction leakage before delivery.
+        Returns structured OpponentMoveResponse with text, move, and conversation state.
         """
+        from backend.app.models.schemas import OpponentMoveResponse
+
         role = ModelRole.DEBATE_OPPONENT
         template_name = "debate_opponent"
         prompt_version = get_prompt_version(template_name)
@@ -247,7 +250,6 @@ class AIGateway:
             )
 
             if settings.LOG_AI_CONTENT:
-                # Bounded debug logging only in local dev when explicitly enabled
                 for m in messages:
                     logger.debug(
                         "ai.request.content_debug",
@@ -275,9 +277,37 @@ class AIGateway:
 
                 if raw_res and raw_res.content:
                     dur_ms = round((time.perf_counter() - start_time) * 1000, 2)
-                    cleaned_text = self._clean_opponent_text(raw_res.content)
-                    char_count = len(cleaned_text)
-                    word_count = len(cleaned_text.split())
+                    raw_text = raw_res.content
+                    
+                    # Try parsing structured JSON first
+                    parsed_move: Optional[OpponentMoveResponse] = None
+                    try:
+                        cleaned_json = clean_json_string(raw_text)
+                        data = json.loads(cleaned_json)
+                        if isinstance(data, dict) and "text" in data:
+                            clean_t = self._clean_opponent_text(data["text"])
+                            parsed_move = OpponentMoveResponse(
+                                text=clean_t,
+                                move=data.get("move", "challenge_assumption"),
+                                requires_response=data.get("requires_response", True),
+                                addressed_claim=data.get("addressed_claim", "your previous statement"),
+                                conversation_state=data.get("conversation_state", "unresolved"),
+                            )
+                    except Exception:
+                        pass
+
+                    if not parsed_move:
+                        cleaned_text = self._clean_opponent_text(raw_text)
+                        parsed_move = OpponentMoveResponse(
+                            text=cleaned_text,
+                            move="challenge_assumption" if current_turn < 3 else "closing_challenge",
+                            requires_response=True,
+                            addressed_claim="your central premise",
+                            conversation_state="unresolved" if current_turn < 3 else "ready_to_close",
+                        )
+
+                    char_count = len(parsed_move.text)
+                    word_count = len(parsed_move.text.split())
 
                     logger.info(
                         "ai.request.completed",
@@ -297,11 +327,11 @@ class AIGateway:
                         response_word_count=word_count,
                     )
 
-                    if settings.LOG_AI_CONTENT:
-                        logger.debug("ai.response.content_debug", snippet=format_sensitive_debug(cleaned_text))
-
                     # Run Prompt-leak diagnostic guardrail
-                    leak_report = detect_prompt_leak(cleaned_text)
+                    leak_report = detect_prompt_leak(raw_text)
+                    if not leak_report.is_leak_suspected:
+                        leak_report = detect_prompt_leak(parsed_move.text)
+
                     if leak_report.is_leak_suspected:
                         logger.warning(
                             "ai.prompt_leak_suspected",
@@ -320,10 +350,9 @@ class AIGateway:
                                 reason="prompt_leak_guard_triggered",
                                 action="triggering_controlled_fallback",
                             )
-                            # Do NOT leak instruction text to user; trigger next fallback
                             continue
 
-                    return cleaned_text
+                    return parsed_move
 
             except Exception as e:
                 dur_ms = round((time.perf_counter() - start_time) * 1000, 2)
@@ -336,7 +365,6 @@ class AIGateway:
                     exception_type=e.__class__.__name__,
                 )
 
-        # Fallback response for offline / test mode or all candidate failure
         logger.info(
             "ai.provider_fallback",
             role=role.value,
@@ -346,10 +374,60 @@ class AIGateway:
             to_model="curated_responses",
             reason="all_ai_candidates_exhausted",
         )
+
+        last_user_text = ""
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                last_user_text = m.get("content", "").lower()
+                break
+
+        if "?" in last_user_text or any(q in last_user_text for q in ["what", "why", "how", "can you", "explain", "clarify"]):
+            return OpponentMoveResponse(
+                text="To answer your question directly: that mechanism operates only under strict conditions that rarely hold in practice. The moment you introduce real-world incentives, your principle collapses.",
+                move="answer_user_question",
+                requires_response=True,
+                addressed_claim="your clarifying question",
+                conversation_state="advanced" if current_turn >= 2 else "unresolved",
+            )
+        elif any(w in last_user_text for w in ["clarify", "mean", "specifically", "actually", "distinction"]):
+            return OpponentMoveResponse(
+                text="Even accepting that clarification, the fundamental problem remains. Shifting the definition does not remove the negative externalities you still have to account for.",
+                move="ask_clarification",
+                requires_response=True,
+                addressed_claim="your revised definition",
+                conversation_state="advanced",
+            )
+        elif any(w in last_user_text for w in ["in conclusion", "to conclude", "finally", "rest my case", "closing"]):
+            return OpponentMoveResponse(
+                text="You have summarized your case clearly, but you have failed to resolve the core contradiction raised in our clash. Without that resolution, your central premise cannot stand.",
+                move="closing_challenge",
+                requires_response=True,
+                addressed_claim="your concluding argument",
+                conversation_state="ready_to_close",
+            )
+
         mock_responses = [
-            "Your argument rests on an unproven assumption, but it overlooks the core mechanism. If what you claim were true, we would see far different real-world outcomes.",
-            "You say this is about individual freedom, but you haven't shown why the negative externalities should be ignored. Where does your principle draw the boundary?",
-            "That is a common defense, yet the evidence points in the opposite direction. What is the single strongest reason that withstands this counterexample?",
+            OpponentMoveResponse(
+                text="Your argument rests on an unproven assumption, but it overlooks the core mechanism. If what you claim were true, we would see far different real-world outcomes.",
+                move="challenge_assumption",
+                requires_response=True,
+                addressed_claim="the core mechanism",
+                conversation_state="unresolved",
+            ),
+            OpponentMoveResponse(
+                text="You say this is about individual freedom, but you haven't shown why the negative externalities should be ignored. Where does your principle draw the boundary?",
+                move="request_evidence",
+                requires_response=True,
+                addressed_claim="individual freedom",
+                conversation_state="advanced",
+            ),
+            OpponentMoveResponse(
+                text="That is a common defense, yet the evidence points in the opposite direction. What is the single strongest reason that withstands this counterexample?",
+                move="counterexample",
+                requires_response=True,
+                addressed_claim="defensive justification",
+                conversation_state="ready_to_close",
+            ),
         ]
         return mock_responses[(current_turn - 1) % len(mock_responses)]
 

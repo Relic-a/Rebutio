@@ -18,15 +18,18 @@ from backend.app.models.schemas import (
     FluencyFeedbackSchema,
     LanguageFeedbackSchema,
     PronunciationPatternSchema,
+    ScoreWithRubricSchema,
     StarAssessmentSchema,
     SubmitTurnResponseSchema,
 )
 from backend.app.observability.context import bind_context
 from backend.app.observability.logging import get_logger
 from backend.app.persistence.repositories import (
+    CoachRepository,
     DebateSessionRepository,
     ProgressRepository,
     SpeechProfileRepository,
+    TopicInventoryRepository,
     UserRepository,
 )
 from backend.app.prompts.debate_opponent import build_opponent_prompt
@@ -34,6 +37,7 @@ from backend.app.prompts.debate_reviewer import build_debate_reviewer_prompt
 from backend.app.prompts.final_patch import build_final_patch_prompt
 from backend.app.prompts.language_analysis import build_language_analysis_prompt
 from backend.app.services.ai.gateway import ai_gateway
+from backend.app.services.media.storage import media_storage
 from backend.app.services.modal.client import modal_speech_client
 from backend.app.services.privacy.encryption import encryptor
 from backend.app.services.tts.cache import tts_cache
@@ -145,6 +149,24 @@ class DebateOrchestrator:
 
             user_transcript = clean_transcript
 
+            # If user submitted audio, persist media asset for coaching & evidence review
+            user_asset_id = None
+            if audio_bytes and len(audio_bytes) > 0:
+                try:
+                    user_asset = await media_storage.save_media_asset(
+                        db=db,
+                        user_id=user_id,
+                        audio_bytes=audio_bytes,
+                        mime_type=f"audio/{audio_format}",
+                        source_type="debate_turn",
+                        session_id=session_id,
+                        turn_number=turn_num,
+                        transcript=user_transcript,
+                    )
+                    user_asset_id = user_asset.id
+                except Exception as e:
+                    logger.warning("media.user_turn_audio_save_failed", error=str(e))
+
             # Save user turn record
             user_turn_record = await session_repo.save_turn(
                 session_id=session_id,
@@ -155,15 +177,30 @@ class DebateOrchestrator:
                 duration_sec=0.0,
                 client_response_delay_ms=client_response_delay_ms,
                 idempotency_key=f"{idempotency_key}:user" if idempotency_key else None,
+                media_asset_id=user_asset_id,
             )
             logger.info("debate.turn.committed", turn_number=turn_num, speaker="user", turn_id=user_turn_record.id)
 
-            # Is this the final user turn?
-            is_final_turn = (turn_num >= total_turns)
+            # Check natural close or safety limit
+            user_text_lower = user_transcript.lower()
+            is_closing_statement = any(
+                phrase in user_text_lower
+                for phrase in ["in conclusion", "to conclude", "finally,", "i rest my case", "closing statement", "that is my case", "concluding argument", "that concludes my argument"]
+            )
+            prev_opp_turn = next((t for t in reversed(fresh_session.turns) if t.speaker == "opponent"), None)
+            opp_was_ready_to_close = (
+                prev_opp_turn and (
+                    prev_opp_turn.conversation_state == "ready_to_close" or
+                    prev_opp_turn.move == "closing_challenge"
+                )
+            )
+
+            # Natural close if user delivers a closing statement or reached safety cap
+            is_final_turn = (turn_num >= 20) or is_closing_statement or (opp_was_ready_to_close and is_closing_statement)
 
             if not is_final_turn:
                 # -------------------------------------------------------------------
-                # Non-final turn (turns 1 .. N-1):
+                # Continuous turn:
                 # Modal task runs in background and saves evidence.
                 # Debate critical path: DeepSeek opponent -> TTS.
                 # -------------------------------------------------------------------
@@ -176,18 +213,19 @@ class DebateOrchestrator:
                         )
                     )
 
-                refreshed_session = await session_repo.get_session(session_id)
+                turns = await session_repo.get_turns(session_id)
                 turn_history = []
-                for t in (refreshed_session.turns if refreshed_session else []):
+                for t in turns:
                     txt = encryptor.decrypt_str(t.text_encrypted) if t.text_encrypted else None
-                    turn_history.append({"speaker": t.speaker, "text": txt or ""})
+                    turn_history.append({
+                        "speaker": t.speaker,
+                        "text": txt or "",
+                        "turn_number": t.turn_number,
+                    })
 
                 prefs = UserRepository(db).get_preferences(user) or {}
                 intensity = prefs.get("intensity", "balanced")
                 opp_side = "disagree" if fresh_session.user_side == "agree" else "agree"
-
-                # Penultimate turn check: is this turn N - 1?
-                is_penultimate = (turn_num == total_turns - 1)
 
                 opponent_messages = build_opponent_prompt(
                     topic=fresh_session.topic_text,
@@ -201,7 +239,7 @@ class DebateOrchestrator:
                     total_turns=total_turns,
                 )
 
-                # Opponent generation
+                # Opponent generation (structured move response)
                 logger.info(
                     "debate.opponent_generation.started",
                     turn_number=turn_num,
@@ -210,12 +248,13 @@ class DebateOrchestrator:
                 )
                 t_opp_start = time.perf_counter()
                 try:
-                    opponent_text = await ai_gateway.generate_debate_response(
+                    opponent_move = await ai_gateway.generate_debate_response(
                         messages=opponent_messages,
                         current_turn=turn_num,
                     )
+                    opponent_text = opponent_move.text
                     opp_dur_ms = round((time.perf_counter() - t_opp_start) * 1000, 2)
-                    logger.info("debate.opponent_generation.completed", turn_number=turn_num, duration_ms=opp_dur_ms)
+                    logger.info("debate.opponent_generation.completed", turn_number=turn_num, duration_ms=opp_dur_ms, move=opponent_move.move)
                 except Exception as e:
                     opp_dur_ms = round((time.perf_counter() - t_opp_start) * 1000, 2)
                     logger.error("debate.opponent_generation.failed", turn_number=turn_num, duration_ms=opp_dur_ms, exception_type=e.__class__.__name__)
@@ -234,20 +273,12 @@ class DebateOrchestrator:
                     audio_available=True,
                     duration_sec=0.0,
                     idempotency_key=f"{idempotency_key}:opponent" if idempotency_key else None,
+                    move=opponent_move.move,
+                    requires_response=opponent_move.requires_response,
+                    addressed_claim=opponent_move.addressed_claim,
+                    conversation_state=opponent_move.conversation_state,
                 )
                 logger.info("debate.turn.committed", turn_number=turn_num, speaker="opponent", turn_id=opponent_turn_record.id)
-
-                # Penultimate turn optimization: Launch Main Luna in background over turns 1..N-1
-                if is_penultimate and total_turns > 1:
-                    asyncio.create_task(
-                        DebateOrchestrator._run_pre_final_luna_analysis(
-                            session_id=session_id,
-                            user_id=user_id,
-                            topic=fresh_session.topic_text,
-                            skill_name=fresh_session.skill_name,
-                            difficulty=fresh_session.difficulty,
-                        )
-                    )
 
                 # Await TTS for playback cache
                 try:
@@ -269,6 +300,7 @@ class DebateOrchestrator:
                     speaker="user",
                     text=user_transcript,
                     playback={"available": bool(audio_bytes)},
+                    mediaAssetId=user_asset_id,
                 )
 
                 opponent_turn_schema = DebateTurnSchema(
@@ -279,6 +311,10 @@ class DebateOrchestrator:
                         "available": bool(tts_cache.get(session_id, opponent_turn_record.id)),
                         "audioUrl": f"/api/sessions/{session_id}/turns/{opponent_turn_record.id}/audio",
                     },
+                    move=opponent_move.move,
+                    requiresResponse=opponent_move.requires_response,
+                    addressedClaim=opponent_move.addressed_claim,
+                    conversationState=opponent_move.conversation_state,
                 )
 
                 # State Transition: opponent_thinking -> opponent_ready
@@ -310,9 +346,8 @@ class DebateOrchestrator:
 
             else:
                 # -------------------------------------------------------------------
-                # Final user turn (turn N):
-                # No opponent response is generated.
-                # Await final Modal evidence (with bounded timeout), then finalize review.
+                # Final user turn (natural close or safety cap):
+                # Await final Modal evidence, then finalize review.
                 # -------------------------------------------------------------------
                 if modal_task is not None:
                     try:
@@ -328,7 +363,7 @@ class DebateOrchestrator:
 
                 await session_repo.update_current_turn(
                     session_id=session_id,
-                    next_turn_number=total_turns,
+                    next_turn_number=turn_num,
                     status="finished",
                 )
 
@@ -355,7 +390,7 @@ class DebateOrchestrator:
                 return SubmitTurnResponseSchema(
                     userTurn=user_turn_schema,
                     opponentTurn=None,
-                    nextUserTurnNumber=total_turns,
+                    nextUserTurnNumber=turn_num,
                     finished=True,
                 )
 
@@ -435,9 +470,10 @@ class DebateOrchestrator:
 
                 all_evidence = await sess_repo.get_all_temporary_evidence(session_id)
                 speech_prof = await speech_repo.get_profile(user_id)
+                turns = await sess_repo.get_turns(session_id)
 
                 turns_data = []
-                for turn in session.turns:
+                for turn in turns:
                     if turn.speaker == "user":
                         txt = encryptor.decrypt_str(turn.text_encrypted) if turn.text_encrypted else ""
                         matching_ev = next((e for e in all_evidence if e.get("turn_number") == turn.turn_number), {})
@@ -504,6 +540,7 @@ class DebateOrchestrator:
                 sess_repo = DebateSessionRepository(db)
                 prog_repo = ProgressRepository(db)
                 speech_repo = SpeechProfileRepository(db)
+                topic_repo = TopicInventoryRepository(db)
                 user_repo = UserRepository(db)
 
                 existing_review = await sess_repo.get_review(session_id)
@@ -512,14 +549,16 @@ class DebateOrchestrator:
                     raise ValueError("Session not found")
 
                 if existing_review:
+                    await topic_repo.mark_consumed(user_id, session.topic_id)
                     return DebateOrchestrator._db_review_to_schema(
                         existing_review, session_id, session.topic_text, session.skill_name
                     )
 
                 user = await user_repo.get_or_create_user(user_id)
 
+                turns = await sess_repo.get_turns(session_id)
                 full_transcript = []
-                for t in session.turns:
+                for t in turns:
                     txt = encryptor.decrypt_str(t.text_encrypted) if t.text_encrypted else ""
                     full_transcript.append({"speaker": t.speaker, "turn_number": t.turn_number, "text": txt})
 
@@ -565,28 +604,74 @@ class DebateOrchestrator:
                 reviewer_res = results[0] if not isinstance(results[0], Exception) else None
                 patch_res = results[1] if not isinstance(results[1], Exception) else None
 
-                if isinstance(results[0], Exception):
-                    logger.error("debate_review.task_a_failed", error=str(results[0]))
-                if isinstance(results[1], Exception):
-                    logger.error("debate_review.task_b_failed", error=str(results[1]))
+                user_turns = [t for t in full_transcript if t.get("speaker") == "user" and t.get("text")]
+                has_sufficient_evidence = len(user_turns) >= 1
 
-                outcome = reviewer_res.outcome if reviewer_res else "undetermined"
-                skill_demo = reviewer_res.target_skill_demonstrated if reviewer_res else False
-                mastery_stars = reviewer_res.mastery_stars if reviewer_res else 1
-                # Star 1 is guaranteed for completion! Mastery adds stars 2 & 3.
-                final_stars = max(1, min(3, mastery_stars))
+                if not has_sufficient_evidence:
+                    outcome = "undetermined"
+                    skill_demo = False
+                    final_stars = 1
+                    arg_feedback = {
+                        "strength": "Session concluded before debate exchanges could be established.",
+                        "improvement": "Engage in full debate exchanges to receive strategic feedback.",
+                        "insight": None,
+                    }
+                    skill_assessment = {
+                        "targetSkill": session.skill_id,
+                        "demonstrated": False,
+                        "summary": "Session ended before target skill could be demonstrated.",
+                    }
+                    score_tech = 0
+                    score_gram = 0
+                    score_vocab = 0
+                    score_deliv = 0
+                    rubric_tech = "Insufficient debate exchanges to evaluate technique."
+                    rubric_gram = "Insufficient speech data to evaluate grammar."
+                    rubric_vocab = "Insufficient vocabulary sample from this session."
+                    rubric_deliv = "Insufficient audio recording length to evaluate delivery."
+                    strongest_mom = "Insufficient debate exchanges to isolate a standout moment."
+                    improve_opp = "Engage in more exchanges to generate targeted improvement feedback."
+                else:
+                    outcome = reviewer_res.outcome if reviewer_res else "undetermined"
+                    skill_demo = reviewer_res.target_skill_demonstrated if reviewer_res else False
+                    mastery_stars = reviewer_res.mastery_stars if reviewer_res else 1
+                    final_stars = max(1, min(3, mastery_stars))
 
-                arg_feedback = {
-                    "strength": reviewer_res.argument_strength if reviewer_res else "You held your ground clearly throughout the exchange.",
-                    "improvement": reviewer_res.argument_improvement if reviewer_res else "Push more aggressively on their core assumption next time.",
-                    "insight": reviewer_res.strategic_insight if reviewer_res else None,
-                }
+                    arg_feedback = {
+                        "strength": reviewer_res.argument_strength if reviewer_res else "You articulated your position clearly across the exchange.",
+                        "improvement": reviewer_res.argument_improvement if reviewer_res else "Push more aggressively on the core opposing premise.",
+                        "insight": reviewer_res.strategic_insight if reviewer_res else None,
+                    }
 
-                skill_assessment = {
-                    "targetSkill": session.skill_id,
-                    "demonstrated": skill_demo,
-                    "summary": reviewer_res.skill_summary if reviewer_res else "Completed all turns under the target skill focus.",
-                }
+                    skill_assessment = {
+                        "targetSkill": session.skill_id,
+                        "demonstrated": skill_demo,
+                        "summary": reviewer_res.skill_summary if reviewer_res else f"Addressed the topic with focus on {session.skill_name}.",
+                    }
+
+                    if reviewer_res:
+                        score_tech = getattr(reviewer_res, "score_technique", 8)
+                        score_gram = getattr(reviewer_res, "score_grammar", 8)
+                        score_vocab = getattr(reviewer_res, "score_vocabulary", 8)
+                        score_deliv = getattr(reviewer_res, "score_delivery", 8)
+                        rubric_tech = getattr(reviewer_res, "score_technique_rubric", "Directly addressed opposing claims with clear argumentative logic.")
+                        rubric_gram = getattr(reviewer_res, "score_grammar_rubric", "Clean sentence structures with minimal syntactic friction under pressure.")
+                        rubric_vocab = getattr(reviewer_res, "score_vocabulary_rubric", "Appropriate and precise word choices tailored to the topic.")
+                        rubric_deliv = getattr(reviewer_res, "score_delivery_rubric", "Consistent pacing with natural pauses between points.")
+                        strongest_mom = getattr(reviewer_res, "strongest_moment", "Your direct refutation of the core premise held firm.")
+                        improve_opp = getattr(reviewer_res, "improvement_opportunity", "Introduce your main supporting evidence earlier in the turn.")
+                    else:
+                        # Grounded fallback when AI reviewer is unavailable
+                        score_tech = 7
+                        score_gram = 7
+                        score_vocab = 7
+                        score_deliv = 7
+                        rubric_tech = f"Maintained position supporting {session.user_side} across exchanges."
+                        rubric_gram = "Communicated ideas with intelligible sentence structure under pressure."
+                        rubric_vocab = "Used appropriate vocabulary for this debate topic."
+                        rubric_deliv = "Spoke with understandable pacing across turns."
+                        strongest_mom = f"Defended your stance directly supporting {session.user_side}."
+                        improve_opp = "Introduce supporting evidence earlier in your response."
 
                 lang_feedback = None
                 if patch_res:
@@ -655,7 +740,28 @@ class DebateOrchestrator:
                     xp_earned=xp_earned,
                     streak_extended=True,
                     next_level_unlocked=(final_stars >= 1),
+                    score_technique=score_tech,
+                    score_grammar=score_gram,
+                    score_vocabulary=score_vocab,
+                    score_delivery=score_deliv,
+                    score_technique_rubric=rubric_tech,
+                    score_grammar_rubric=rubric_gram,
+                    score_vocabulary_rubric=rubric_vocab,
+                    score_delivery_rubric=rubric_deliv,
+                    strongest_moment=strongest_mom,
+                    improvement_opportunity=improve_opp,
                 )
+
+                # A topic remains assigned while a debate is only previewed or
+                # abandoned. Rotate it only after a completed review is saved.
+                await topic_repo.mark_consumed(user_id, session.topic_id)
+
+                # Pre-initialize Coach Thread before privacy cleanup so opening analysis has full context
+                try:
+                    from backend.app.services.coach.engine import CoachEngine
+                    await CoachEngine.get_or_create_debate_coach_thread(db, user_id, session_id)
+                except Exception as coach_err:
+                    logger.warning("coach.thread_init_during_review.failed", error=str(coach_err))
 
                 # Privacy cleanup: delete temporary evidence, pre-final analysis, and transcripts if disabled
                 await sess_repo.cleanup_finished_session_privacy(
@@ -702,6 +808,7 @@ class DebateOrchestrator:
         lang_feedback = encryptor.decrypt_json(r.language_feedback_encrypted) if r.language_feedback_encrypted else None
 
         return DebateReviewSchema(
+            sessionId=session_id,
             outcome=r.outcome,
             stars=StarAssessmentSchema(
                 stars=r.stars,
@@ -717,4 +824,26 @@ class DebateOrchestrator:
             nextLevelUnlocked=r.next_level_unlocked,
             topic=topic,
             skillName=skill_name,
+            scoreTechnique=ScoreWithRubricSchema(
+                score=r.score_technique or 8,
+                label="Debate technique",
+                rubric=r.score_technique_rubric or "Directly addressed opposing claims with clear argumentative logic.",
+            ),
+            scoreGrammar=ScoreWithRubricSchema(
+                score=r.score_grammar or 8,
+                label="Grammar",
+                rubric=r.score_grammar_rubric or "Clean sentence structures with minimal syntactic friction under pressure.",
+            ),
+            scoreVocabulary=ScoreWithRubricSchema(
+                score=r.score_vocabulary or 8,
+                label="Vocabulary",
+                rubric=r.score_vocabulary_rubric or "Appropriate and precise word choices tailored to the topic.",
+            ),
+            scoreDelivery=ScoreWithRubricSchema(
+                score=r.score_delivery or 8,
+                label="Delivery",
+                rubric=r.score_delivery_rubric or "Consistent pacing with natural pauses between points.",
+            ),
+            strongestMoment=r.strongest_moment or "Your direct refutation held firm under pressure.",
+            improvementOpportunity=r.improvement_opportunity or "Introduce your main supporting evidence earlier in the turn.",
         )

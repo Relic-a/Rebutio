@@ -24,7 +24,7 @@ async def get_debate_review(
     from backend.app.models.db import DebateSession
 
     target_session_id = session_id
-    if session_id == "current":
+    if session_id in ("current", "latest"):
         stmt = select(DebateSession).where(DebateSession.user_id == user.id).order_by(DebateSession.created_at.desc()).limit(1)
         res = await db.execute(stmt)
         latest = res.scalar_one_or_none()
@@ -62,7 +62,7 @@ async def submit_review_feedback(
     from backend.app.models.db import DebateSession
 
     target_session_id = session_id
-    if session_id == "current":
+    if session_id in ("current", "latest"):
         stmt = select(DebateSession).where(DebateSession.user_id == user.id).order_by(DebateSession.created_at.desc()).limit(1)
         res = await db.execute(stmt)
         latest = res.scalar_one_or_none()

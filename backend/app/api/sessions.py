@@ -48,8 +48,9 @@ async def get_session(
     if not sess or sess.user_id != user.id:
         raise HTTPException(status_code=404, detail="Debate session not found")
 
+    turns = await sess_repo.get_turns(session_id)
     turn_schemas = []
-    for t in sess.turns:
+    for t in turns:
         txt = encryptor.decrypt_str(t.text_encrypted) if t.text_encrypted else None
         audio_url = f"/api/sessions/{session_id}/turns/{t.id}/audio" if t.speaker == "opponent" else None
         turn_schemas.append(
@@ -128,8 +129,9 @@ async def submit_turn(
             requested_turn=turn_index,
             current_turn=session.current_turn,
         )
-        user_t = next((t for t in session.turns if t.turn_number == turn_index and t.speaker == "user"), None)
-        opp_t = next((t for t in session.turns if t.turn_number == turn_index and t.speaker == "opponent"), None)
+        saved_turns = await sess_repo.get_turns(session_id)
+        user_t = next((t for t in saved_turns if t.turn_number == turn_index and t.speaker == "user"), None)
+        opp_t = next((t for t in saved_turns if t.turn_number == turn_index and t.speaker == "opponent"), None)
         if user_t:
             u_txt = encryptor.decrypt_str(user_t.text_encrypted) if user_t.text_encrypted else None
             o_txt = encryptor.decrypt_str(opp_t.text_encrypted) if opp_t and opp_t.text_encrypted else None
@@ -219,7 +221,8 @@ async def get_turn_audio(
     sess_repo = DebateSessionRepository(db)
     session = await sess_repo.get_session(session_id)
     if session and session.user_id == user.id:
-        turn = next((t for t in session.turns if t.id == turn_id), None)
+        turns = await sess_repo.get_turns(session_id)
+        turn = next((t for t in turns if t.id == turn_id), None)
         if turn and turn.speaker == "opponent" and turn.text_encrypted:
             txt = encryptor.decrypt_str(turn.text_encrypted)
             if txt:

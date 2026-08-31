@@ -3,11 +3,11 @@
 // Normal debate route: briefing → debate → results.
 // Renders whatever setup the service provides; no topic logic here.
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Button } from "@/components/shared/Button";
-import { DebateFlow } from "@/components/debate/DebateFlow";
+import { ContinuousDebateFlow } from "@/components/debate/ContinuousDebateFlow";
 import { appService } from "@/lib/api";
 import { useStore } from "@/lib/state/store";
 import type { DebateReview, DebateSession, DebateSetup } from "@/lib/types";
@@ -28,15 +28,24 @@ function DebateLoader() {
   const [session, setSession] = useState<{ session: DebateSession; setup: DebateSetup } | null>(null);
   const [briefed, setBriefed] = useState(false);
   const [side, setSide] = useState<"agree" | "disagree" | null>(null);
+  const [starting, setStarting] = useState(false);
+  const startInFlight = useRef(false);
 
   async function begin(s: "agree" | "disagree") {
+    if (startInFlight.current) return;
+    startInFlight.current = true;
     try {
       setSide(s);
+      setStarting(true);
+      setError(null);
       const sess = await appService.startDebate({ topicId: topicId ?? undefined, side: s });
       setSession(sess);
       setBriefed(true);
     } catch {
       setError("Couldn't start this debate. Check your connection and try again.");
+    } finally {
+      startInFlight.current = false;
+      setStarting(false);
     }
   }
 
@@ -45,20 +54,54 @@ function DebateLoader() {
     router.replace("/results");
   }
 
-  if (!briefed || !session) return <Briefing topicId={topicId} error={error} side={side} onStart={begin} />;
-  return <DebateFlow session={session.session} setup={session.setup} onFinish={finish} />;
+  if (!briefed || !session) {
+    return (
+      <Briefing
+        topicId={topicId}
+        error={error}
+        side={side}
+        starting={starting}
+        onSelectSide={setSide}
+        onStart={begin}
+      />
+    );
+  }
+  return <ContinuousDebateFlow session={session.session} setup={session.setup} onFinish={finish} />;
 }
 
-function Briefing({ topicId, error, side, onStart }: { topicId: string | null; error: string | null; side: "agree" | "disagree" | null; onStart: (s: "agree" | "disagree") => void }) {
+function Briefing({ topicId, error, side, starting, onSelectSide, onStart }: {
+  topicId: string | null;
+  error: string | null;
+  side: "agree" | "disagree" | null;
+  starting: boolean;
+  onSelectSide: (side: "agree" | "disagree") => void;
+  onStart: (side: "agree" | "disagree") => void;
+}) {
   const [info, setInfo] = useState<{ topic: string; skill: string; difficulty: string; turns: number; minutes: number; reminder: string } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
     appService.getDebateChoices().then((topics) => {
-      const t = topics.find((x) => x.id === topicId) ?? topics[0];
+      const t = topicId ? topics.find((x) => x.id === topicId) : topics[0];
+      if (!t) {
+        setLoadError("This debate topic is no longer available. Go back to your path and choose the current debate again.");
+        return;
+      }
       setInfo({ topic: t.topic, skill: t.skill.replace(/_/g, " "), difficulty: t.difficulty, turns: t.turns, minutes: t.minutes, reminder: t.reminder });
-    });
+    }).catch(() => setLoadError("Couldn't load this debate. Check your connection and try again."));
   }, [topicId]);
+
+  if (loadError) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center px-6">
+        <div className="max-w-sm text-center">
+          <p role="alert" className="text-sm text-coral">{loadError}</p>
+          <Button onClick={() => router.back()} className="mt-5">Back to path</Button>
+        </div>
+      </main>
+    );
+  }
 
   if (!info) return <main className="flex min-h-dvh items-center justify-center text-ink-soft">Loading debate…</main>;
 
@@ -78,12 +121,12 @@ function Briefing({ topicId, error, side, onStart }: { topicId: string | null; e
             <dd className="font-semibold capitalize">{info.difficulty}</dd>
           </div>
           <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-            <dt className="text-ink-soft">Your turns</dt>
-            <dd className="font-semibold">{info.turns}</dd>
+            <dt className="text-ink-soft">Format</dt>
+            <dd className="font-semibold">Continuous Spoken Spar</dd>
           </div>
           <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
             <dt className="text-ink-soft">Estimated time</dt>
-            <dd className="font-semibold">~{info.minutes} min</dd>
+            <dd className="font-semibold">~{info.minutes || 3} min</dd>
           </div>
         </dl>
 
@@ -91,10 +134,10 @@ function Briefing({ topicId, error, side, onStart }: { topicId: string | null; e
 
         <p className="mt-8 font-semibold">Choose your side.</p>
         <div className="mt-2 flex gap-3">
-          <button onClick={() => onStart("agree")} aria-pressed={side === "agree"} className={`flex-1 rounded-full border-2 py-3 font-semibold transition-colors ${side === "agree" ? "border-rally bg-rally-mist text-rally-deep" : "border-ink/10 bg-white"}`}>
+          <button disabled={starting} onClick={() => onSelectSide("agree")} aria-pressed={side === "agree"} className={`flex-1 rounded-full border-2 py-3 font-semibold transition-colors disabled:cursor-not-allowed ${side === "agree" ? "border-rally bg-rally-mist text-rally-deep" : "border-ink/10 bg-white"}`}>
             Agree
           </button>
-          <button onClick={() => onStart("disagree")} aria-pressed={side === "disagree"} className={`flex-1 rounded-full border-2 py-3 font-semibold transition-colors ${side === "disagree" ? "border-coral bg-coral-soft text-coral" : "border-ink/10 bg-white"}`}>
+          <button disabled={starting} onClick={() => onSelectSide("disagree")} aria-pressed={side === "disagree"} className={`flex-1 rounded-full border-2 py-3 font-semibold transition-colors disabled:cursor-not-allowed ${side === "disagree" ? "border-coral bg-coral-soft text-coral" : "border-ink/10 bg-white"}`}>
             Disagree
           </button>
         </div>
@@ -109,8 +152,8 @@ function Briefing({ topicId, error, side, onStart }: { topicId: string | null; e
           <button onClick={() => router.back()} className="text-sm font-medium text-ink-soft underline underline-offset-4">
             Back
           </button>
-          <Button onClick={() => onStart(side ?? "agree")} className="min-w-40">
-            Start Debate
+          <Button disabled={starting} onClick={() => onStart(side ?? "agree")} className="min-w-40">
+            {starting ? "Starting…" : "Start Debate"}
           </Button>
         </div>
       </motion.div>

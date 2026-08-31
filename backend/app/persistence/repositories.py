@@ -6,10 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.models.db import (
+    CoachMessage,
+    CoachThread,
+    CoachingMemoryItem,
     DebateReview,
     DebateSession,
     DebateTurn,
+    DerivedAudioClip,
     LearningProgress,
+    MediaAsset,
     ReviewFeedback,
     SpeechProfile,
     TemporaryTurnEvidence,
@@ -211,7 +216,7 @@ class TopicInventoryRepository:
         stmt = (
             select(TopicInventory)
             .where(TopicInventory.user_id == user_id, TopicInventory.consumed == False)
-            .order_by(TopicInventory.created_at.desc())
+            .order_by(TopicInventory.created_at.asc())
             .limit(limit)
         )
         res = await self.db.execute(stmt)
@@ -223,12 +228,17 @@ class TopicInventoryRepository:
         return len(list(res.scalars().all()))
 
     async def get_topic_by_id(self, user_id: str, topic_id: str) -> Optional[TopicInventory]:
-        stmt = select(TopicInventory).where(
-            TopicInventory.user_id == user_id,
-            TopicInventory.topic_id == topic_id,
+        stmt = (
+            select(TopicInventory)
+            .where(
+                TopicInventory.user_id == user_id,
+                TopicInventory.topic_id == topic_id,
+            )
+            .order_by(TopicInventory.consumed.asc(), TopicInventory.created_at.desc())
+            .limit(1)
         )
         res = await self.db.execute(stmt)
-        return res.scalar_one_or_none()
+        return res.scalars().first()
 
     async def add_topics(self, user_id: str, topics: List[dict]):
         for t in topics:
@@ -308,12 +318,35 @@ class DebateSessionRepository:
         res = await self.db.execute(stmt)
         return res.scalar_one_or_none()
 
+    async def get_turns(self, session_id: str) -> List[DebateTurn]:
+        stmt = (
+            select(DebateTurn)
+            .where(DebateTurn.session_id == session_id)
+            .order_by(DebateTurn.turn_number.asc(), DebateTurn.created_at.asc())
+        )
+        res = await self.db.execute(stmt)
+        return list(res.scalars().all())
+
     async def get_active_session_for_user(self, user_id: str) -> Optional[DebateSession]:
         stmt = (
             select(DebateSession)
             .where(DebateSession.user_id == user_id, DebateSession.status == "active")
             .order_by(DebateSession.created_at.desc())
             .options(selectinload(DebateSession.turns))
+            .limit(1)
+        )
+        res = await self.db.execute(stmt)
+        return res.scalar_one_or_none()
+
+    async def get_latest_session_for_user(self, user_id: str) -> Optional[DebateSession]:
+        stmt = (
+            select(DebateSession)
+            .where(DebateSession.user_id == user_id)
+            .order_by(DebateSession.created_at.desc())
+            .options(
+                selectinload(DebateSession.turns),
+                selectinload(DebateSession.review),
+            )
             .limit(1)
         )
         res = await self.db.execute(stmt)
@@ -329,6 +362,11 @@ class DebateSessionRepository:
         duration_sec: float = 0.0,
         client_response_delay_ms: int = 0,
         idempotency_key: Optional[str] = None,
+        move: Optional[str] = None,
+        requires_response: bool = True,
+        addressed_claim: Optional[str] = None,
+        conversation_state: str = "unresolved",
+        media_asset_id: Optional[str] = None,
     ) -> DebateTurn:
         if idempotency_key:
             stmt = select(DebateTurn).where(
@@ -353,6 +391,11 @@ class DebateSessionRepository:
             duration_sec=duration_sec,
             client_response_delay_ms=client_response_delay_ms,
             idempotency_key=idempotency_key,
+            move=move,
+            requires_response=requires_response,
+            addressed_claim=addressed_claim,
+            conversation_state=conversation_state,
+            media_asset_id=media_asset_id,
         )
         self.db.add(turn)
         await self.db.commit()
@@ -428,6 +471,16 @@ class DebateSessionRepository:
         xp_earned: int,
         streak_extended: bool,
         next_level_unlocked: bool,
+        score_technique: int = 8,
+        score_grammar: int = 8,
+        score_vocabulary: int = 8,
+        score_delivery: int = 8,
+        score_technique_rubric: Optional[str] = None,
+        score_grammar_rubric: Optional[str] = None,
+        score_vocabulary_rubric: Optional[str] = None,
+        score_delivery_rubric: Optional[str] = None,
+        strongest_moment: Optional[str] = None,
+        improvement_opportunity: Optional[str] = None,
     ) -> DebateReview:
         stmt = select(DebateReview).where(DebateReview.session_id == session_id)
         res = await self.db.execute(stmt)
@@ -447,6 +500,16 @@ class DebateSessionRepository:
             existing.xp_earned = xp_earned
             existing.streak_extended = streak_extended
             existing.next_level_unlocked = next_level_unlocked
+            existing.score_technique = score_technique
+            existing.score_grammar = score_grammar
+            existing.score_vocabulary = score_vocabulary
+            existing.score_delivery = score_delivery
+            existing.score_technique_rubric = score_technique_rubric
+            existing.score_grammar_rubric = score_grammar_rubric
+            existing.score_vocabulary_rubric = score_vocabulary_rubric
+            existing.score_delivery_rubric = score_delivery_rubric
+            existing.strongest_moment = strongest_moment
+            existing.improvement_opportunity = improvement_opportunity
             review = existing
         else:
             review = DebateReview(
@@ -463,6 +526,16 @@ class DebateSessionRepository:
                 xp_earned=xp_earned,
                 streak_extended=streak_extended,
                 next_level_unlocked=next_level_unlocked,
+                score_technique=score_technique,
+                score_grammar=score_grammar,
+                score_vocabulary=score_vocabulary,
+                score_delivery=score_delivery,
+                score_technique_rubric=score_technique_rubric,
+                score_grammar_rubric=score_grammar_rubric,
+                score_vocabulary_rubric=score_vocabulary_rubric,
+                score_delivery_rubric=score_delivery_rubric,
+                strongest_moment=strongest_moment,
+                improvement_opportunity=improvement_opportunity,
             )
             self.db.add(review)
 
@@ -504,3 +577,294 @@ class DebateSessionRepository:
         res = await self.db.execute(stmt)
         await self.db.commit()
         logger.info("privacy.history_retention_applied", retention_hours=hours)
+
+
+# ---------------------------------------------------------------------------
+# Coach Repository
+# ---------------------------------------------------------------------------
+
+class CoachRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_or_create_debate_thread(self, user_id: str, session_id: str, title: str) -> CoachThread:
+        stmt = (
+            select(CoachThread)
+            .where(CoachThread.user_id == user_id, CoachThread.session_id == session_id)
+            .options(
+                selectinload(CoachThread.messages).selectinload(CoachMessage.evidence_clip),
+                selectinload(CoachThread.session),
+            )
+        )
+        res = await self.db.execute(stmt)
+        thread = res.scalar_one_or_none()
+        if thread:
+            return thread
+
+        thread_id = f"thread-deb-{uuid.uuid4().hex[:8]}"
+        thread = CoachThread(
+            id=thread_id,
+            user_id=user_id,
+            session_id=session_id,
+            thread_type="debate_review",
+            title=title,
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        self.db.add(thread)
+        await self.db.commit()
+        await self.db.refresh(thread)
+        return thread
+
+    async def create_general_thread(self, user_id: str, title: str = "General Coaching") -> CoachThread:
+        thread_id = f"thread-gen-{uuid.uuid4().hex[:8]}"
+        thread = CoachThread(
+            id=thread_id,
+            user_id=user_id,
+            session_id=None,
+            thread_type="general",
+            title=title,
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        self.db.add(thread)
+        await self.db.commit()
+        await self.db.refresh(thread)
+        return thread
+
+    async def get_thread(self, user_id: str, thread_id: str) -> Optional[CoachThread]:
+        stmt = (
+            select(CoachThread)
+            .where(CoachThread.id == thread_id, CoachThread.user_id == user_id)
+            .options(
+                selectinload(CoachThread.messages).selectinload(CoachMessage.evidence_clip),
+                selectinload(CoachThread.session),
+            )
+        )
+        res = await self.db.execute(stmt)
+        return res.scalar_one_or_none()
+
+    async def get_thread_messages(self, thread_id: str) -> List[CoachMessage]:
+        stmt = (
+            select(CoachMessage)
+            .where(CoachMessage.thread_id == thread_id)
+            .options(selectinload(CoachMessage.evidence_clip))
+            .order_by(CoachMessage.created_at.asc())
+        )
+        res = await self.db.execute(stmt)
+        return list(res.scalars().all())
+
+    async def list_threads(self, user_id: str, limit: int = 30) -> List[CoachThread]:
+        stmt = (
+            select(CoachThread)
+            .where(CoachThread.user_id == user_id)
+            .order_by(CoachThread.updated_at.desc())
+            .options(
+                selectinload(CoachThread.messages),
+                selectinload(CoachThread.session),
+            )
+            .limit(limit)
+        )
+        res = await self.db.execute(stmt)
+        return list(res.scalars().all())
+
+    async def add_message(
+        self,
+        user_id: str,
+        thread_id: str,
+        sender: str,
+        message_type: str,
+        text: Optional[str] = None,
+        media_asset_id: Optional[str] = None,
+        evidence_clip_id: Optional[str] = None,
+        structured_data: Optional[dict] = None,
+        processing_state: str = "ready",
+    ) -> CoachMessage:
+        msg_id = f"msg-{uuid.uuid4().hex[:10]}"
+        encrypted_text = encryptor.encrypt_str(text) if text else None
+
+        msg = CoachMessage(
+            id=msg_id,
+            thread_id=thread_id,
+            user_id=user_id,
+            sender=sender,
+            message_type=message_type,
+            text_encrypted=encrypted_text,
+            media_asset_id=media_asset_id,
+            evidence_clip_id=evidence_clip_id,
+            structured_data_json=structured_data,
+            processing_state=processing_state,
+            created_at=utcnow(),
+        )
+        self.db.add(msg)
+
+        stmt_thread = (
+            update(CoachThread)
+            .where(CoachThread.id == thread_id)
+            .values(updated_at=utcnow())
+        )
+        await self.db.execute(stmt_thread)
+        await self.db.commit()
+        await self.db.refresh(msg)
+        return msg
+
+    async def update_message_processing_state(
+        self,
+        msg_id: str,
+        processing_state: str,
+        text: Optional[str] = None,
+        structured_data: Optional[dict] = None,
+    ):
+        values = {"processing_state": processing_state}
+        if text is not None:
+            values["text_encrypted"] = encryptor.encrypt_str(text)
+        if structured_data is not None:
+            values["structured_data_json"] = structured_data
+
+        stmt = update(CoachMessage).where(CoachMessage.id == msg_id).values(**values)
+        await self.db.execute(stmt)
+        await self.db.commit()
+
+    async def get_longitudinal_memory(
+        self,
+        user_id: str,
+        focus_area: Optional[str] = None,
+    ) -> List[CoachingMemoryItem]:
+        stmt = (
+            select(CoachingMemoryItem)
+            .where(CoachingMemoryItem.user_id == user_id)
+            .order_by(CoachingMemoryItem.updated_at.desc())
+        )
+        if focus_area:
+            stmt = stmt.where(CoachingMemoryItem.pattern_type == focus_area)
+        res = await self.db.execute(stmt)
+        return list(res.scalars().all())
+
+    async def update_or_create_memory_item(
+        self,
+        user_id: str,
+        pattern_type: str,
+        label: str,
+        status: str = "active_focus",
+        confidence: float = 0.8,
+        trend: str = "steady",
+        supporting_evidence: Optional[List[dict]] = None,
+        counterevidence: Optional[List[dict]] = None,
+        user_correction: Optional[str] = None,
+    ) -> CoachingMemoryItem:
+        stmt = select(CoachingMemoryItem).where(
+            CoachingMemoryItem.user_id == user_id,
+            CoachingMemoryItem.pattern_type == pattern_type,
+            CoachingMemoryItem.label == label,
+        )
+        res = await self.db.execute(stmt)
+        item = res.scalar_one_or_none()
+
+        if item:
+            item.status = status
+            item.confidence = max(item.confidence, confidence)
+            item.sessions_observed += 1
+            item.trend = trend
+            item.last_discussed_at = utcnow()
+            item.updated_at = utcnow()
+            if supporting_evidence:
+                ev_list = list(item.supporting_evidence_json or [])
+                ev_list.extend(supporting_evidence)
+                item.supporting_evidence_json = ev_list[-10:]
+            if counterevidence:
+                cev_list = list(item.counterevidence_json or [])
+                cev_list.extend(counterevidence)
+                item.counterevidence_json = cev_list[-10:]
+            if user_correction:
+                item.user_correction = user_correction
+        else:
+            item = CoachingMemoryItem(
+                id=f"mem-{uuid.uuid4().hex[:10]}",
+                user_id=user_id,
+                pattern_type=pattern_type,
+                label=label,
+                status=status,
+                confidence=confidence,
+                sessions_observed=1,
+                trend=trend,
+                supporting_evidence_json=supporting_evidence or [],
+                counterevidence_json=counterevidence or [],
+                last_discussed_at=utcnow(),
+                user_correction=user_correction,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            self.db.add(item)
+
+        await self.db.commit()
+        await self.db.refresh(item)
+        return item
+
+    async def apply_user_memory_correction(
+        self,
+        user_id: str,
+        pattern_id: Optional[str],
+        pattern_type: Optional[str],
+        label: Optional[str],
+        correction_text: str,
+        action: str = "update",
+    ) -> Optional[CoachingMemoryItem]:
+        item = None
+        if pattern_id:
+            stmt = select(CoachingMemoryItem).where(CoachingMemoryItem.id == pattern_id, CoachingMemoryItem.user_id == user_id)
+            res = await self.db.execute(stmt)
+            item = res.scalar_one_or_none()
+
+        if not item and pattern_type and label:
+            stmt = select(CoachingMemoryItem).where(
+                CoachingMemoryItem.user_id == user_id,
+                CoachingMemoryItem.pattern_type == pattern_type,
+                CoachingMemoryItem.label == label,
+            )
+            res = await self.db.execute(stmt)
+            item = res.scalar_one_or_none()
+
+        if item:
+            item.user_correction = correction_text
+            if action in ("dismiss", "reject_feedback"):
+                item.status = "dismissed"
+            item.updated_at = utcnow()
+            await self.db.commit()
+            await self.db.refresh(item)
+            logger.info("coach.memory.correction_applied", item_id=item.id, action=action)
+            return item
+        else:
+            # Create a user preference / correction record
+            new_item = CoachingMemoryItem(
+                id=f"mem-{uuid.uuid4().hex[:10]}",
+                user_id=user_id,
+                pattern_type=pattern_type or "user_preference",
+                label=label or "User Correction",
+                status="dismissed" if action in ("dismiss", "reject_feedback") else "active_focus",
+                confidence=1.0,
+                sessions_observed=1,
+                trend="steady",
+                supporting_evidence_json=[],
+                counterevidence_json=[],
+                user_correction=correction_text,
+                last_discussed_at=utcnow(),
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            self.db.add(new_item)
+            await self.db.commit()
+            await self.db.refresh(new_item)
+            return new_item
+
+    async def get_active_focus(self, user_id: str) -> Tuple[str, Optional[str]]:
+        stmt = (
+            select(CoachingMemoryItem)
+            .where(CoachingMemoryItem.user_id == user_id, CoachingMemoryItem.status == "active_focus")
+            .order_by(CoachingMemoryItem.confidence.desc(), CoachingMemoryItem.updated_at.desc())
+            .limit(1)
+        )
+        res = await self.db.execute(stmt)
+        item = res.scalar_one_or_none()
+        if item:
+            return item.label, f"Observed in {item.sessions_observed} debates · Trend: {item.trend}"
+        return "Early Premise Clarity", "Focus on stating your central claim within the first 10 seconds of speaking."

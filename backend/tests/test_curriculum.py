@@ -39,3 +39,14 @@ def test_calculate_path_nodes_progression_one_star_rule():
     assert nodes2[1]["status"] == "complete"
     assert nodes2[2]["status"] == "current"
     assert nodes2[3]["status"] == "locked"
+
+
+def test_calculate_path_nodes_keeps_topic_id_with_preview():
+    nodes = calculate_path_nodes(
+        {},
+        topic_previews={"take_a_side": "Cats are better pets than dogs."},
+        topic_ids={"take_a_side": "cats-dogs"},
+    )
+
+    assert nodes[0]["topicId"] == "cats-dogs"
+    assert nodes[0]["topicPreview"] == "Cats are better pets than dogs."

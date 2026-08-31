@@ -39,12 +39,12 @@ class Settings(BaseSettings):
 
     # OpenRouter Role Models (defaults from architecture contract)
     OPENROUTER_TRANSCRIPTION_MODEL: str = "microsoft/mai-transcribe-1.5"
-    OPENROUTER_DEBATE_MODEL: str = "deepseek/deepseek-v4-pro-0813:nitro"
-    OPENROUTER_TTS_MODEL: str = "fish-audio/s2.1-pro"
-    OPENROUTER_ANALYSIS_MODEL: str = "openai/gpt-5.6-luna-pro:nitro"
-    OPENROUTER_FINAL_PATCH_MODEL: str = "openai/gpt-5.6-luna-pro:nitro"
-    OPENROUTER_REVIEW_MODEL: str = "openai/gpt-5.6-luna-pro:nitro"
-    OPENROUTER_TOPIC_MODEL: str = "deepseek/deepseek-v4-flash-0731:nitro"
+    OPENROUTER_DEBATE_MODEL: str = "deepseek/deepseek-v4-pro-0813"
+    OPENROUTER_TTS_MODEL: str = "deepgram/flux-tts:free"
+    OPENROUTER_ANALYSIS_MODEL: str = "openai/gpt-5.6-luna-pro"
+    OPENROUTER_FINAL_PATCH_MODEL: str = "openai/gpt-5.6-luna-pro"
+    OPENROUTER_REVIEW_MODEL: str = "openai/gpt-5.6-luna-pro"
+    OPENROUTER_TOPIC_MODEL: str = "deepseek/deepseek-v4-flash-0731"
 
     # Router.com / Ramp Router Models (optional per role)
     ROUTER_DEBATE_MODEL: Optional[str] = None
@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     ROUTER_TOPIC_MODEL: Optional[str] = None
 
     # Opponent Voice (optional, model-dependent)
-    REBUTIO_TTS_VOICE: Optional[str] = None
+    REBUTIO_TTS_VOICE: Optional[str] = "flux-jack-en"
 
     # Modal Speech Analysis
     MODAL_APP_NAME: str = "rebutio-speech-analysis"

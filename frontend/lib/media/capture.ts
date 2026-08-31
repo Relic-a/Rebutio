@@ -10,7 +10,13 @@ export type CaptureAdapter = {
   requestPermission(): Promise<"allowed" | "denied" | "unavailable">;
   startRecording(): Promise<void>;
   stopRecording(): Promise<Blob | null>;
+  cancelRecording(): Promise<void>;
   isRecording(): boolean;
+
+  // Semantic convenience aliases
+  start(): Promise<void>;
+  stop(): Promise<{ blob: Blob } | null>;
+  cancel(): Promise<void>;
 };
 
 class BrowserCapture implements CaptureAdapter {
@@ -70,8 +76,31 @@ class BrowserCapture implements CaptureAdapter {
     });
   }
 
+  async cancelRecording(): Promise<void> {
+    if (this.recorder && this.recorder.state !== "inactive") {
+      this.recorder.stop();
+    }
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+    this.recorder = null;
+    this.chunks = [];
+  }
+
   isRecording() {
     return this.recorder?.state === "recording";
+  }
+
+  async start() {
+    return this.startRecording();
+  }
+
+  async stop() {
+    const blob = await this.stopRecording();
+    return blob ? { blob } : null;
+  }
+
+  async cancel() {
+    return this.cancelRecording();
   }
 }
 
@@ -79,11 +108,13 @@ export const capture: CaptureAdapter =
   typeof window !== "undefined" && typeof MediaRecorder !== "undefined"
     ? new BrowserCapture()
     : {
-        // Graceful fallback: SSR or unsupported browsers get a no-op adapter
-        // so the debate flow remains demoable.
         async checkAvailability() { return "unavailable"; },
         async requestPermission() { return "unavailable"; },
         async startRecording() { throw new Error("unavailable"); },
         async stopRecording() { return null; },
+        async cancelRecording() {},
         isRecording() { return false; },
+        async start() { throw new Error("unavailable"); },
+        async stop() { return null; },
+        async cancel() {},
       };

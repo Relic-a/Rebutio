@@ -3,8 +3,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.bootstrap import router as bootstrap_router
+from backend.app.api.coach import router as coach_router
 from backend.app.api.debates import router as debates_router
 from backend.app.api.health import router as health_router
+from backend.app.api.media import router as media_router
 from backend.app.api.onboarding import router as onboarding_router
 from backend.app.api.path import router as path_router
 from backend.app.api.progress import router as progress_router
@@ -119,6 +121,8 @@ app.include_router(sessions_router)
 app.include_router(review_router)
 app.include_router(progress_router)
 app.include_router(settings_router)
+app.include_router(coach_router)
+app.include_router(media_router)
 
 
 if __name__ == "__main__":

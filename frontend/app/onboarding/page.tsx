@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/shared/Button";
 import { Logo } from "@/components/shared/Logo";
-import { DebateFlow } from "@/components/debate/DebateFlow";
+import { ContinuousDebateFlow } from "@/components/debate/ContinuousDebateFlow";
 import { appService } from "@/lib/api";
 import { onboardingOptions } from "@/lib/mock/fixtures";
 import { capture } from "@/lib/media/capture";
@@ -195,7 +195,7 @@ export default function OnboardingPage() {
         )}
         {step === 6 && <SparBriefing key="s6" topic={sparTopic} onBack={() => setStep(5)} onStart={startSpar} />}
         {step === 7 && <MicPermission key="s7" state={micState} onEnable={async () => { const r = await capture.requestPermission(); setMicState(r); continueToDebate(); }} onSkip={continueToDebate} onRetry={async () => { const r = await capture.requestPermission(); setMicState(r); if (r === "allowed") continueToDebate(); }} />}
-        {step === 8 && session && <DebateFlow key="s8" session={session.session} setup={session.setup} onFinish={finish} />}
+        {step === 8 && session && <ContinuousDebateFlow key="s8" session={session.session} setup={session.setup} onFinish={finish} />}
         {step === 9 && <div />}
       </AnimatePresence>
     </main>
@@ -232,7 +232,7 @@ function Welcome({ onNext }: { onNext: () => void }) {
         <Button onClick={onNext} className="w-full">
           Start my first debate
         </Button>
-        <p className="mt-4 text-center text-xs text-ink-soft">3 turns. No grammar drills. Just argue.</p>
+        <p className="mt-4 text-center text-xs text-ink-soft">Live spoken spar. No grammar drills. Just argue.</p>
       </div>
     </motion.div>
   );
@@ -292,7 +292,7 @@ function SparBriefing({ topic, onBack, onStart }: { topic: string; onBack: () =>
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-ink-soft">First spar</p>
       <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">Let&apos;s see how you argue.</h1>
       <ul className="mt-4 space-y-1 text-sm text-ink-soft">
-        <li>· 3 short turns</li>
+        <li>· Live continuous spar</li>
         <li>· No right answer</li>
         <li>· No pressure — this helps Rebutio choose where your path starts</li>
       </ul>

@@ -51,15 +51,15 @@ class TopicInventoryService:
                 "reminder": t.reminder or skill.reminder,
             })
 
-        # Check if refill is needed
-        if len(choices) <= settings.INVENTORY_REFILL_THRESHOLD:
-            # Trigger background refill
-            asyncio.create_task(TopicInventoryService._background_refill(user_id))
-
         # If inventory was completely empty, generate synchronous fallback
         if not choices:
             fallback_topic = await TopicInventoryService.generate_synchronous_fallback(db, user_id)
             choices.append(fallback_topic)
+
+        # Trigger refill only after a fallback has been committed. Available
+        # topics are FIFO, so new inventory cannot replace the assigned topic.
+        if len(choices) <= settings.INVENTORY_REFILL_THRESHOLD:
+            asyncio.create_task(TopicInventoryService._background_refill(user_id))
 
         return choices
 

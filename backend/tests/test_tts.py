@@ -80,8 +80,43 @@ async def test_gemini_synthesis_pcm_to_wav(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_deepgram_flux_synthesis_mp3_handling(monkeypatch):
+    """
+    Verifies that deepgram/flux-tts:free correctly passes model, voice (flux-jack-en),
+    and mp3 response_format.
+    """
+    client = OpenRouterClient(api_key="test-api-key")
+    captured_payload = None
+
+    async def mock_post(url, headers=None, json=None):
+        nonlocal captured_payload
+        captured_payload = json
+        mp3_content = b"\xff\xfb\x90\xc4\x00\x00\x00\x00\x00\x00\x00\x00"
+        return httpx.Response(
+            status_code=200,
+            headers={"content-type": "audio/mpeg"},
+            content=mp3_content,
+        )
+
+    with patch("httpx.AsyncClient.post", new=AsyncMock(side_effect=mock_post)):
+        audio_bytes = await client.synthesize_speech(
+            text="Rebuttal",
+            voice="flux-jack-en",
+            model="deepgram/flux-tts:free",
+        )
+
+        assert captured_payload["model"] == "deepgram/flux-tts:free"
+        assert captured_payload["response_format"] == "mp3"
+        assert captured_payload["input"] == "Rebuttal"
+        assert captured_payload["voice"] == "flux-jack-en"
+
+        assert audio_bytes.startswith(b"\xff\xfb")
+
+
+@pytest.mark.asyncio
 async def test_gateway_synthesize_speech_uses_configured_model(monkeypatch):
     """
-    Verifies AIGateway uses fish-audio/s2.1-pro by default.
+    Verifies AIGateway uses deepgram/flux-tts:free and flux-jack-en by default.
     """
-    assert "fish-audio" in settings.OPENROUTER_TTS_MODEL
+    assert "deepgram" in settings.OPENROUTER_TTS_MODEL or "flux-tts" in settings.OPENROUTER_TTS_MODEL
+    assert settings.REBUTIO_TTS_VOICE == "flux-jack-en"

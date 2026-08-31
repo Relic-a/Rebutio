@@ -2,6 +2,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from backend.app.api.dependencies import sign_user_id
 from backend.app.main import app
 from backend.app.persistence.db import init_db
 
@@ -134,6 +135,39 @@ async def test_bootstrap_and_onboarding_flow():
 
 
 @pytest.mark.asyncio
+async def test_path_debate_topic_assignment_stays_stable_after_start():
+    user_id = "topic-assignment-regression-user"
+    headers = {"X-User-ID-Signed": sign_user_id(user_id)}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers=headers,
+    ) as client:
+        choices = (await client.get("/api/debates/choices")).json()
+        assert choices
+
+        first_path = (await client.get("/api/path")).json()
+        current = next(node for node in first_path["nodes"] if node["status"] == "current")
+        assert current["topicId"]
+        assert current["topicPreview"]
+
+        started = await client.post(
+            "/api/debates/start",
+            json={"topicId": current["topicId"], "side": "agree"},
+        )
+        assert started.status_code == 200
+        assert started.json()["session"]["topic"] == current["topicPreview"]
+
+        second_path = (await client.get("/api/path")).json()
+        current_again = next(
+            node for node in second_path["nodes"] if node["status"] == "current"
+        )
+        assert current_again["topicId"] == current["topicId"]
+        assert current_again["topicPreview"] == current["topicPreview"]
+
+
+@pytest.mark.asyncio
 async def test_oversized_audio_upload_rejection():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/api/debates/start", json={"side": "agree"})
@@ -189,5 +223,4 @@ async def test_empty_submission_without_audio_or_text_returns_422():
         )
         assert turn_resp.status_code == 422
         assert "No speech detected" in turn_resp.json()["detail"]
-
 

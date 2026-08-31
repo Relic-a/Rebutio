@@ -125,7 +125,7 @@ async def test_prompt_leak_guardrail_fallback_trigger():
         output_tokens=35,
         provider_request_id="gen-mock-123",
         finish_reason="stop",
-        resolved_model="deepseek/deepseek-v4-pro-0813:nitro",
+        resolved_model="deepseek/deepseek-v4-pro-0813",
         upstream_provider="openrouter",
     )
 
@@ -137,10 +137,11 @@ async def test_prompt_leak_guardrail_fallback_trigger():
             mock_router_com.return_value = mock_raw_result
 
             # Attempt to generate debate response
-            result_text = await ai_gateway.generate_debate_response(
+            res = await ai_gateway.generate_debate_response(
                 messages=[{"role": "user", "content": "I agree with the motion."}],
                 current_turn=1,
             )
+            result_text = res.text if hasattr(res, "text") else str(res)
 
     # 1. Verify warning log was emitted
     leak_logs = [l for l in cap_logs if l.get("event") == "ai.prompt_leak_suspected"]
@@ -156,3 +157,122 @@ async def test_prompt_leak_guardrail_fallback_trigger():
     assert "Rebutio should deliver" not in result_text
     assert len(result_text) > 20
     assert detect_prompt_leak(result_text).is_leak_suspected is False
+
+
+def test_build_opponent_prompt_multi_turn_attribution():
+    """
+    Verifies that multi-turn history retains speaker attribution, side tracking,
+    and anchors the active turn without confusing sides.
+    """
+    history = [
+        {"speaker": "user", "text": "College wastes time and money.", "turn_number": 1},
+        {"speaker": "opponent", "text": "College builds networks and credentials.", "turn_number": 1},
+        {"speaker": "user", "text": "A portfolio in software or marketing proves the work better.", "turn_number": 2},
+        {"speaker": "opponent", "text": "Average graduates outearn non-graduates over a lifetime.", "turn_number": 2},
+        {"speaker": "user", "text": "What kind of non-graduates are you talking about?", "turn_number": 3},
+    ]
+
+    messages = build_opponent_prompt(
+        topic="College is no longer worth the financial cost.",
+        opponent_side="disagree",
+        user_side="agree",
+        skill_name="Counterpoint",
+        difficulty="steady",
+        intensity="balanced",
+        turn_history=history,
+        current_turn_number=3,
+        total_turns=4,
+    )
+
+    # 1. System message
+    assert messages[0]["role"] == "system"
+    assert "DISAGREE" in messages[0]["content"]
+
+    # 2. History turns properly attributed
+    assert messages[1]["role"] == "user"
+    assert "[User Turn 1 | Defending: AGREE]" in messages[1]["content"]
+    assert "College wastes time and money." in messages[1]["content"]
+
+    assert messages[2]["role"] == "assistant"
+    assert "[Rebutio Turn 1 | Defending: DISAGREE]" in messages[2]["content"]
+    assert "College builds networks and credentials." in messages[2]["content"]
+
+    assert messages[3]["role"] == "user"
+    assert "[User Turn 2 | Defending: AGREE]" in messages[3]["content"]
+
+    assert messages[4]["role"] == "assistant"
+    assert "[Rebutio Turn 2 | Defending: DISAGREE]" in messages[4]["content"]
+
+    # 3. Latest active user turn contains the question and strict debate directive
+    assert messages[5]["role"] == "user"
+    assert "[User Turn 3 | Defending: AGREE]" in messages[5]["content"]
+    assert "What kind of non-graduates are you talking about?" in messages[5]["content"]
+    assert "[Debate Directive for Rebutio Turn 3]" in messages[5]["content"]
+    assert "Your Assigned Side: DISAGREE" in messages[5]["content"]
+    assert "answer it directly from your assigned position (DISAGREE)" in messages[5]["content"]
+
+
+@pytest.mark.asyncio
+async def test_multi_turn_spar_history_propagation_e2e():
+    """
+    E2E test verifying that each subsequent turn in a multi-turn spar
+    properly receives all preceding user and opponent turns.
+    """
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Start Debate
+        start_resp = await client.post("/api/debates/start", json={"side": "agree", "topicId": "College is no longer worth the financial cost."})
+        assert start_resp.status_code == 200
+        session_id = start_resp.json()["session"]["id"]
+
+        captured_prompt_messages = []
+
+        original_generate = ai_gateway.generate_debate_response
+
+        async def spy_generate(messages, current_turn=1):
+            captured_prompt_messages.append({"turn": current_turn, "messages": messages})
+            return await original_generate(messages=messages, current_turn=current_turn)
+
+        with patch.object(ai_gateway, "generate_debate_response", side_effect=spy_generate):
+            # Turn 1
+            t1_resp = await client.post(
+                f"/api/sessions/{session_id}/turns",
+                data={"transcript": "College wastes time and money.", "turn_index": 1},
+            )
+            assert t1_resp.status_code == 200
+
+            # Turn 2
+            t2_resp = await client.post(
+                f"/api/sessions/{session_id}/turns",
+                data={"transcript": "Proof and credentials can be gotten via portfolio faster.", "turn_index": 2},
+            )
+            assert t2_resp.status_code == 200
+
+            # Turn 3
+            t3_resp = await client.post(
+                f"/api/sessions/{session_id}/turns",
+                data={"transcript": "What kind of average non-graduates are you talking about?", "turn_index": 3},
+            )
+            assert t3_resp.status_code == 200
+
+        # Verify spy captures
+        assert len(captured_prompt_messages) == 3
+
+        # Turn 1 messages
+        t1_msgs = captured_prompt_messages[0]["messages"]
+        assert len(t1_msgs) == 2  # system + user turn 1
+        assert "College wastes time and money." in t1_msgs[1]["content"]
+
+        # Turn 2 messages: must have system, user turn 1, opponent turn 1, user turn 2
+        t2_msgs = captured_prompt_messages[1]["messages"]
+        assert len(t2_msgs) == 4  # system + u1 + opp1 + u2
+        assert "College wastes time and money." in t2_msgs[1]["content"]
+        assert "[Rebutio Turn 1 | Defending: DISAGREE]" in t2_msgs[2]["content"]
+        assert "Proof and credentials can be gotten via portfolio faster." in t2_msgs[3]["content"]
+
+        # Turn 3 messages: must have system, u1, opp1, u2, opp2, u3 (with question)
+        t3_msgs = captured_prompt_messages[2]["messages"]
+        assert len(t3_msgs) == 6  # system + u1 + opp1 + u2 + opp2 + u3
+        assert "College wastes time and money." in t3_msgs[1]["content"]
+        assert "Proof and credentials can be gotten via portfolio faster." in t3_msgs[3]["content"]
+        assert "What kind of average non-graduates are you talking about?" in t3_msgs[5]["content"]
+        assert "[Debate Directive for Rebutio Turn 3]" in t3_msgs[5]["content"]

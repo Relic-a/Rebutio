@@ -91,7 +91,7 @@ export default function PathPage() {
                 </div>
                 {n.status === "current" && (
                   <Link
-                    href="/debate"
+                    href={n.topicId ? `/debate?topic=${encodeURIComponent(n.topicId)}` : "/debate"}
                     className="mt-3 block rounded-full bg-white py-2.5 text-center text-sm font-semibold text-rally-deep"
                   >
                     Debate now

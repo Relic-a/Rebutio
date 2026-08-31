@@ -74,7 +74,6 @@ async def start_debate(
         difficulty = topic_record.difficulty
         turns = topic_record.turns
         reminder = topic_record.reminder or skill.reminder
-        await topic_repo.mark_consumed(user.id, topic_record.topic_id)
     else:
         # Check if topic available in inventory
         available = await topic_repo.get_available_topics(user.id, limit=1)
@@ -86,7 +85,6 @@ async def start_debate(
             difficulty = inv_t.difficulty
             turns = inv_t.turns
             reminder = inv_t.reminder or skill.reminder
-            await topic_repo.mark_consumed(user.id, inv_t.topic_id)
         else:
             skill = default_skill
             topic_id = req.topicId or f"topic-{uuid.uuid4().hex[:6]}"

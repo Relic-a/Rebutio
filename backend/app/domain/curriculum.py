@@ -145,7 +145,11 @@ def get_skill(skill_id: str) -> SkillDefinition:
     return SKILL_MAP.get(skill_id, CURRICULUM_SKILLS[0])
 
 
-def calculate_path_nodes(stars_by_node: Dict[str, int], topic_previews: Optional[Dict[str, str]] = None) -> List[dict]:
+def calculate_path_nodes(
+    stars_by_node: Dict[str, int],
+    topic_previews: Optional[Dict[str, str]] = None,
+    topic_ids: Optional[Dict[str, str]] = None,
+) -> List[dict]:
     """
     Computes node statuses ('complete', 'current', 'locked') and star counts.
     Rule: A node unlocks when the previous node has >= 1 star.
@@ -178,6 +182,7 @@ def calculate_path_nodes(stars_by_node: Dict[str, int], topic_previews: Optional
             "description": skill.description,
             "stars": stars,
             "status": status,
+            "topicId": (topic_ids or {}).get(skill.id),
             "topicPreview": preview,
         })
 

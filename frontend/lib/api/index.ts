@@ -5,6 +5,10 @@
 // ============================================================
 
 import type {
+  CoachHomeData,
+  CoachMessage,
+  CoachThreadDetail,
+  CoachThreadSummary,
   DebateReview,
   DebateSetup,
   DebateSession,
@@ -64,6 +68,23 @@ export type AppService = {
   getDebateReview(sessionId: string): Promise<DebateReview>;
   submitReviewFeedback(feedback: { sessionId: string; verdict: "disagree"; reason?: string }): Promise<void>;
   getProgress(): Promise<ProgressStats>;
+
+  // Coaching System Endpoints
+  getCoachHome(): Promise<CoachHomeData>;
+  getSessionCoachThread(sessionId: string): Promise<CoachThreadDetail>;
+  createGeneralCoachThread(text: string): Promise<CoachThreadDetail>;
+  getCoachThreadDetail(threadId: string): Promise<CoachThreadDetail>;
+  sendCoachTextMessage(threadId: string, text: string): Promise<CoachMessage>;
+  sendCoachAudioMessage(threadId: string, audio: Blob): Promise<{ userMessage: CoachMessage; coachMessage: CoachMessage }>;
+  correctCoachingMemory(correction: {
+    patternId?: string;
+    patternType?: string;
+    label?: string;
+    correctionText: string;
+    action?: "update" | "dismiss" | "reject_feedback";
+  }): Promise<any>;
+  getMediaAssetAudioUrl(assetId: string): string;
+  getClipAudioUrl(clipId: string): string;
 };
 
 // ---------------------------------------------------------------------------
@@ -254,6 +275,67 @@ export function createHttpService(baseUrl: string = ""): AppService {
     async getProgress() {
       return request<ProgressStats>("/api/progress");
     },
+
+    async getCoachHome() {
+      return request<CoachHomeData>("/api/coach/home");
+    },
+
+    async getSessionCoachThread(sessionId: string) {
+      return request<CoachThreadDetail>(`/api/coach/session/${sessionId}`);
+    },
+
+    async createGeneralCoachThread(text: string) {
+      return request<CoachThreadDetail>("/api/coach/threads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+    },
+
+    async getCoachThreadDetail(threadId: string) {
+      return request<CoachThreadDetail>(`/api/coach/threads/${threadId}`);
+    },
+
+    async sendCoachTextMessage(threadId: string, text: string) {
+      return request<CoachMessage>(`/api/coach/threads/${threadId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+    },
+
+    async sendCoachAudioMessage(threadId: string, audio: Blob) {
+      const formData = new FormData();
+      formData.append("audio", audio, "coach_audio.webm");
+
+      const res = await fetch(`${apiBase}/api/coach/threads/${threadId}/audio`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(parseErrorDetail(errText, "Failed to upload audio to coach"));
+      }
+      return res.json();
+    },
+
+    async correctCoachingMemory(correction) {
+      return request("/api/coach/memory/correction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(correction),
+      });
+    },
+
+    getMediaAssetAudioUrl(assetId: string) {
+      return `${apiBase}/api/media/${assetId}/audio`;
+    },
+
+    getClipAudioUrl(clipId: string) {
+      return `${apiBase}/api/media/clips/${clipId}/audio`;
+    },
   };
 }
 
@@ -346,6 +428,163 @@ export function createMockService(): AppService {
     async getProgress() {
       await delay(250);
       return mockProgressStats;
+    },
+    async getCoachHome() {
+      await delay(200);
+      return {
+        activeFocus: "Clarifying the core premise in turn 1",
+        focusDetails: "Observed in 4 recent debates. Steady improvement.",
+        progressSummary: mockProgressStats,
+        presetQuestions: [
+          { label: "Refutations", prompt: "How can I make my refutations punchier?" },
+          { label: "Hesitation", prompt: "How do I cut down pauses before speaking?" },
+          { label: "Concessions", prompt: "When should I concede without losing ground?" },
+          { label: "Structure", prompt: "Give me a framework for 30-second spoken turns." },
+        ],
+        recentDebateThreads: [
+          {
+            id: "thread-mock-1",
+            sessionId: "session-mock-1",
+            threadType: "debate_review",
+            title: "Debate Review · Social media friendships",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            messageCount: 4,
+            topic: "Social media has made friendships worse.",
+            skillName: "Counterpoint",
+          },
+        ],
+        generalThreads: [],
+      };
+    },
+    async getSessionCoachThread(sessionId: string) {
+      await delay(300);
+      return {
+        thread: {
+          id: `thread-deb-${sessionId}`,
+          sessionId,
+          threadType: "debate_review",
+          title: "Debate Coaching Session",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messageCount: 2,
+          topic: "Social media has made friendships worse.",
+          skillName: "Counterpoint",
+        },
+        messages: [
+          {
+            id: "msg-mock-1",
+            threadId: `thread-deb-${sessionId}`,
+            sender: "coach",
+            messageType: "opening_analysis",
+            text: "Strong performance challenging the core premise. Let's look at your timing in turn 2.",
+            openingAnalysis: {
+              overallAssessment: "You defended your position clearly with solid conviction.",
+              mostImportantStrength: "You attacked the counterargument's definition of connection directly.",
+              highestValueImprovement: "Lead with your main point immediately before elaborating.",
+              suggestedQuickReplies: [
+                { label: "How should I structure the opening?", prompt: "How should I structure the opening?" },
+                { label: "Give me an example", prompt: "Give me an example of a sharper turn 2 refutation." },
+                { label: "Let me retry turn 2", prompt: "I want to practice turn 2 again." },
+              ],
+            },
+          },
+        ],
+      };
+    },
+    async createGeneralCoachThread(text: string) {
+      await delay(300);
+      const threadId = `thread-gen-${Date.now()}`;
+      return {
+        thread: {
+          id: threadId,
+          threadType: "general",
+          title: text.slice(0, 40),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messageCount: 2,
+        },
+        messages: [
+          {
+            id: `msg-${Date.now()}-1`,
+            threadId,
+            sender: "user",
+            messageType: "text",
+            text,
+          },
+          {
+            id: `msg-${Date.now()}-2`,
+            threadId,
+            sender: "coach",
+            messageType: "text",
+            text: "In spoken debates, leading with a crisp 1-sentence claim makes your response immediately memorable.",
+            quickReplies: [
+              { label: "Give me an example", prompt: "Give me an example." },
+              { label: "Let me try that", prompt: "Let me practice that." },
+            ],
+          },
+        ],
+      };
+    },
+    async getCoachThreadDetail(threadId: string) {
+      await delay(200);
+      return {
+        thread: {
+          id: threadId,
+          threadType: "general",
+          title: "Coaching Thread",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messageCount: 2,
+        },
+        messages: [],
+      };
+    },
+    async sendCoachTextMessage(threadId: string, text: string) {
+      await delay(300);
+      return {
+        id: `msg-${Date.now()}`,
+        threadId,
+        sender: "coach",
+        messageType: "text",
+        text: `Regarding "${text}": Always isolate the opponent's unstated assumption first, then provide a single counter-example.`,
+        quickReplies: [
+          { label: "Try another example", prompt: "Give me another example." },
+          { label: "How do I practice this?", prompt: "How do I practice this in a live debate?" },
+        ],
+      };
+    },
+    async sendCoachAudioMessage(threadId: string, _audio: Blob) {
+      await delay(600);
+      const userMsg: CoachMessage = {
+        id: `msg-u-${Date.now()}`,
+        threadId,
+        sender: "user",
+        messageType: "audio",
+        text: "I practiced delivering the point with direct assertion.",
+        durationSec: 4.2,
+      };
+      const coachMsg: CoachMessage = {
+        id: `msg-c-${Date.now()}`,
+        threadId,
+        sender: "coach",
+        messageType: "text",
+        text: "Excellent pace. Your vocal attack on the opening premise was crisp and confident.",
+        quickReplies: [
+          { label: "Try another turn", prompt: "Let's try another turn." },
+        ],
+      };
+      return { userMessage: userMsg, coachMessage: coachMsg };
+    },
+    async correctCoachingMemory() {
+      await delay(200);
+      return { success: true };
+    },
+    getMediaAssetAudioUrl(assetId: string) {
+      return `/api/media/${assetId}/audio`;
+    },
+    getClipAudioUrl(clipId: string) {
+      return `/api/media/clips/${clipId}/audio`;
     },
   };
 }

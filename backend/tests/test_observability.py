@@ -57,7 +57,7 @@ def test_redaction_secrets_and_preservation_of_token_metrics():
         "tokens_per_second": 35.4,
         # Normal fields
         "role": "debate_opponent",
-        "model": "deepseek/deepseek-v4-pro-0813:nitro",
+        "model": "deepseek/deepseek-v4-pro-0813",
         "turn_number": 1,
     }
 
@@ -82,7 +82,7 @@ def test_redaction_secrets_and_preservation_of_token_metrics():
     assert redacted["tokens_per_second"] == 35.4
 
     assert redacted["role"] == "debate_opponent"
-    assert redacted["model"] == "deepseek/deepseek-v4-pro-0813:nitro"
+    assert redacted["model"] == "deepseek/deepseek-v4-pro-0813"
 
 
 def test_bearer_token_string_redaction():

@@ -20,6 +20,7 @@ class PathNodeSchema(BaseModel):
     description: str
     stars: int = Field(ge=0, le=3)
     status: Literal["complete", "current", "locked"]
+    topicId: Optional[str] = None
     topicPreview: Optional[str] = None
 
 
@@ -60,6 +61,12 @@ class DebateTurnSchema(BaseModel):
     text: Optional[str] = None
     playback: Optional[DebateTurnPlaybackSchema] = None
     durationSec: Optional[float] = None
+    # Conversational metadata
+    move: Optional[str] = None  # challenge_assumption | ask_clarification | counterexample | request_evidence | concede_and_press | answer_user_question | closing_challenge
+    requiresResponse: bool = True
+    addressedClaim: Optional[str] = None
+    conversationState: Optional[Literal["unresolved", "advanced", "ready_to_close"]] = "unresolved"
+    mediaAssetId: Optional[str] = None
 
 
 class SkillTargetSchema(BaseModel):
@@ -158,7 +165,14 @@ class ArgumentFeedbackSchema(BaseModel):
     insight: Optional[str] = None
 
 
+class ScoreWithRubricSchema(BaseModel):
+    score: int = Field(ge=1, le=10)
+    label: str
+    rubric: str
+
+
 class DebateReviewSchema(BaseModel):
+    sessionId: Optional[str] = None
     outcome: Literal["user_win", "opponent_win", "draw", "undetermined"]
     stars: StarAssessmentSchema
     skillAssessment: Optional[SkillAssessmentSchema] = None
@@ -169,6 +183,38 @@ class DebateReviewSchema(BaseModel):
     nextLevelUnlocked: Optional[bool] = None
     topic: str
     skillName: str
+
+    # Concise Results 4 Integer Scores out of 10
+    scoreTechnique: ScoreWithRubricSchema = Field(
+        default_factory=lambda: ScoreWithRubricSchema(
+            score=8,
+            label="Debate technique",
+            rubric="Directly addressed opposing claims and provided reasoned counterpoints.",
+        )
+    )
+    scoreGrammar: ScoreWithRubricSchema = Field(
+        default_factory=lambda: ScoreWithRubricSchema(
+            score=8,
+            label="Grammar",
+            rubric="Clean sentence structures with minimal syntactic friction under pressure.",
+        )
+    )
+    scoreVocabulary: ScoreWithRubricSchema = Field(
+        default_factory=lambda: ScoreWithRubricSchema(
+            score=8,
+            label="Vocabulary",
+            rubric="Appropriate and precise word choices tailored to the debate motion.",
+        )
+    )
+    scoreDelivery: ScoreWithRubricSchema = Field(
+        default_factory=lambda: ScoreWithRubricSchema(
+            score=8,
+            label="Delivery",
+            rubric="Steady speech rate and natural conversational pauses.",
+        )
+    )
+    strongestMoment: str = "Your direct refutation of the core premise held firm."
+    improvementOpportunity: str = "Introduce your main supporting evidence earlier in the turn."
 
 
 class ReviewFeedbackRequestSchema(BaseModel):
@@ -216,6 +262,92 @@ class DebateHistoryDetailSchema(BaseModel):
     session: DebateSessionSchema
     review: Optional[DebateReviewSchema] = None
     transcriptsSaved: bool
+
+
+# ---------------------------------------------------------------------------
+# Coaching Chat & Media Contracts
+# ---------------------------------------------------------------------------
+
+class QuickReplySchema(BaseModel):
+    label: str
+    prompt: str
+
+
+class OpeningAnalysisSchema(BaseModel):
+    overallAssessment: str
+    mostImportantStrength: str
+    highestValueImprovement: str
+    concreteExample: Optional[str] = None
+    evidenceTurnNumber: Optional[int] = None
+    suggestedQuickReplies: List[QuickReplySchema] = Field(default_factory=list)
+
+
+class AudioEvidenceCardSchema(BaseModel):
+    clipId: str
+    mediaAssetId: str
+    audioUrl: str
+    durationSec: float
+    sourceLabel: str  # e.g. "Debate · Turn 3" | "Practice attempt"
+    transcriptExcerpt: str
+    whatToNotice: str
+    turnNumber: Optional[int] = None
+    available: bool = True
+
+
+class CoachMessageSchema(BaseModel):
+    id: str
+    threadId: str
+    sender: Literal["user", "coach"]
+    messageType: Literal["text", "audio", "opening_analysis", "evidence_card"]
+    text: Optional[str] = None
+    mediaAssetId: Optional[str] = None
+    audioUrl: Optional[str] = None
+    durationSec: Optional[float] = None
+    evidenceClip: Optional[AudioEvidenceCardSchema] = None
+    openingAnalysis: Optional[OpeningAnalysisSchema] = None
+    quickReplies: Optional[List[QuickReplySchema]] = None
+    processingState: Literal["recording", "uploading", "processing", "ready", "failed"] = "ready"
+    createdAt: str
+
+
+class CoachThreadSummarySchema(BaseModel):
+    id: str
+    sessionId: Optional[str] = None
+    threadType: Literal["debate_review", "general"]
+    title: str
+    createdAt: str
+    updatedAt: str
+    messageCount: int = 0
+    topic: Optional[str] = None
+    skillName: Optional[str] = None
+
+
+class CoachThreadDetailSchema(BaseModel):
+    thread: CoachThreadSummarySchema
+    messages: List[CoachMessageSchema]
+    debateSession: Optional[DebateSessionSchema] = None
+    debateReview: Optional[DebateReviewSchema] = None
+
+
+class CoachHomeSchema(BaseModel):
+    activeFocus: str
+    focusDetails: Optional[str] = None
+    progressSummary: ProgressStatsSchema
+    presetQuestions: List[QuickReplySchema]
+    recentDebateThreads: List[CoachThreadSummarySchema]
+    generalThreads: List[CoachThreadSummarySchema]
+
+
+class SendTextMessageRequestSchema(BaseModel):
+    text: str
+
+
+class MemoryCorrectionRequestSchema(BaseModel):
+    patternId: Optional[str] = None
+    patternType: Optional[str] = None
+    label: Optional[str] = None
+    correctionText: str
+    action: Literal["update", "dismiss", "reject_feedback"] = "update"
 
 
 # ---------------------------------------------------------------------------
@@ -304,3 +436,55 @@ class DebateReviewerResult(BaseModel):
     argument_strength: str
     argument_improvement: str
     strategic_insight: Optional[str] = None
+    score_technique: int = 8
+    score_grammar: int = 8
+    score_vocabulary: int = 8
+    score_delivery: int = 8
+    score_technique_rubric: str = "Directly addressed opposing arguments with structured counterpoints."
+    score_grammar_rubric: str = "Grammatically clear and coherent speech under time pressure."
+    score_vocabulary_rubric: str = "Appropriate vocabulary and phrase variation."
+    score_delivery_rubric: str = "Consistent pacing and fluent spoken delivery."
+    strongest_moment: str = "Your rebuttal in turn 2 addressed the opposing premise directly."
+    improvement_opportunity: str = "State your core claim earlier before elaborate setup."
+
+
+class OpponentMoveResponse(BaseModel):
+    text: str
+    move: Literal[
+        "challenge_assumption",
+        "ask_clarification",
+        "counterexample",
+        "request_evidence",
+        "concede_and_press",
+        "answer_user_question",
+        "closing_challenge",
+    ] = "challenge_assumption"
+    requires_response: bool = True
+    addressed_claim: str = "the previous point"
+    conversation_state: Literal["unresolved", "advanced", "ready_to_close"] = "unresolved"
+
+
+class CoachOpeningAnalysisResult(BaseModel):
+    overall_assessment: str
+    most_important_strength: str
+    highest_value_improvement: str
+    concrete_example: Optional[str] = None
+    evidence_turn_number: Optional[int] = None
+    suggested_quick_replies: List[str] = Field(
+        default_factory=lambda: [
+            "Show me another example",
+            "How should I phrase it?",
+            "Was my grammar a problem?",
+            "What should I practice?",
+            "Let me try that again",
+        ]
+    )
+
+
+class CoachTurnResponse(BaseModel):
+    reply_text: str
+    requested_tool: Optional[str] = None
+    tool_args: Optional[Dict[str, Any]] = None
+    evidence_card: Optional[Dict[str, Any]] = None
+    quick_replies: List[str] = Field(default_factory=list)
+    memory_update: Optional[Dict[str, Any]] = None
