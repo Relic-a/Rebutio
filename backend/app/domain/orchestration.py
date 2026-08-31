@@ -187,16 +187,9 @@ class DebateOrchestrator:
                 phrase in user_text_lower
                 for phrase in ["in conclusion", "to conclude", "finally,", "i rest my case", "closing statement", "that is my case", "concluding argument", "that concludes my argument"]
             )
-            prev_opp_turn = next((t for t in reversed(fresh_session.turns) if t.speaker == "opponent"), None)
-            opp_was_ready_to_close = (
-                prev_opp_turn and (
-                    prev_opp_turn.conversation_state == "ready_to_close" or
-                    prev_opp_turn.move == "closing_challenge"
-                )
-            )
 
             # Natural close if user delivers a closing statement or reached safety cap
-            is_final_turn = (turn_num >= 20) or is_closing_statement or (opp_was_ready_to_close and is_closing_statement)
+            is_final_turn = (turn_num >= 20) or is_closing_statement
 
             if not is_final_turn:
                 # -------------------------------------------------------------------
@@ -239,7 +232,7 @@ class DebateOrchestrator:
                     total_turns=total_turns,
                 )
 
-                # Opponent generation (structured move response)
+                # Opponent generation (plain text response)
                 logger.info(
                     "debate.opponent_generation.started",
                     turn_number=turn_num,
@@ -248,13 +241,12 @@ class DebateOrchestrator:
                 )
                 t_opp_start = time.perf_counter()
                 try:
-                    opponent_move = await ai_gateway.generate_debate_response(
+                    opponent_text = await ai_gateway.generate_debate_response(
                         messages=opponent_messages,
                         current_turn=turn_num,
                     )
-                    opponent_text = opponent_move.text
                     opp_dur_ms = round((time.perf_counter() - t_opp_start) * 1000, 2)
-                    logger.info("debate.opponent_generation.completed", turn_number=turn_num, duration_ms=opp_dur_ms, move=opponent_move.move)
+                    logger.info("debate.opponent_generation.completed", turn_number=turn_num, duration_ms=opp_dur_ms)
                 except Exception as e:
                     opp_dur_ms = round((time.perf_counter() - t_opp_start) * 1000, 2)
                     logger.error("debate.opponent_generation.failed", turn_number=turn_num, duration_ms=opp_dur_ms, exception_type=e.__class__.__name__)
@@ -273,10 +265,6 @@ class DebateOrchestrator:
                     audio_available=True,
                     duration_sec=0.0,
                     idempotency_key=f"{idempotency_key}:opponent" if idempotency_key else None,
-                    move=opponent_move.move,
-                    requires_response=opponent_move.requires_response,
-                    addressed_claim=opponent_move.addressed_claim,
-                    conversation_state=opponent_move.conversation_state,
                 )
                 logger.info("debate.turn.committed", turn_number=turn_num, speaker="opponent", turn_id=opponent_turn_record.id)
 
@@ -311,10 +299,6 @@ class DebateOrchestrator:
                         "available": bool(tts_cache.get(session_id, opponent_turn_record.id)),
                         "audioUrl": f"/api/sessions/{session_id}/turns/{opponent_turn_record.id}/audio",
                     },
-                    move=opponent_move.move,
-                    requiresResponse=opponent_move.requires_response,
-                    addressedClaim=opponent_move.addressed_claim,
-                    conversationState=opponent_move.conversation_state,
                 )
 
                 # State Transition: opponent_thinking -> opponent_ready

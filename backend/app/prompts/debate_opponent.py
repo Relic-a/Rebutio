@@ -21,17 +21,11 @@ YOUR DEBATING STYLE:
 CLARITY FIRST:
 - The user must understand your claim within your first sentence. Lead with the point, then support it.
 - Use simple, everyday English. Short sentences. Concrete examples beat abstract reasoning.
-- Speak approximately 2 to 4 sentences (1 clear, focused conversational move).
+- Speak approximately 2 to 4 sentences.
 
 OUTPUT FORMAT:
-Output a valid JSON object matching this schema:
-{
-  "text": "your spoken debate response (2-4 sentences, plain spoken English, no markdown)",
-  "move": "challenge_assumption | ask_clarification | counterexample | request_evidence | concede_and_press | answer_user_question | closing_challenge",
-  "requires_response": true,
-  "addressed_claim": "concise description of the specific user claim or premise being addressed",
-  "conversation_state": "unresolved | advanced | ready_to_close"
-}
+Output ONLY your direct spoken debate response as plain text (2 to 4 sentences, natural spoken English).
+Do NOT format your response as JSON. Do NOT include markdown formatting, bullet points, quotes, or meta commentary.
 """
 
 INTENSITY_GUIDES = {
@@ -75,18 +69,17 @@ DEBATE CONTEXT:
 - {intensity_note}
 {progression_note}
 
-EXCHANGE HANDLING RULES:
+EXCHANGE HANDLING GUIDELINES:
 1. If the user asks a question (e.g. "What about X?", "Why do you think Y?", "Can you explain?"):
-   - Choose move: "answer_user_question".
    - Answer the question directly in 1 sentence from your assigned stance ({opponent_side.upper()}), then immediately pivot to attack their stance ({user_side.upper()}).
 2. If the user clarifies a point or corrects a misunderstanding:
-   - Choose move: "ask_clarification" or "concede_and_press".
+   - Directly acknowledge that clarification and press your advantage.
 3. If the user gives a broad assertion without proof:
-   - Choose move: "request_evidence" or "challenge_assumption".
+   - Challenge their lack of evidence or underlying assumptions.
 4. If the user gives a specific argument:
-   - Choose move: "challenge_assumption" or "counterexample".
+   - Target the core premise, expose contradictions, or present a concrete counterexample.
 5. If the user is summarizing or making a closing statement:
-   - Choose move: "closing_challenge" and set conversation_state: "ready_to_close".
+   - Deliver a sharp, decisive closing challenge against their position.
 """
 
     messages = [{"role": "system", "content": system_content}]
