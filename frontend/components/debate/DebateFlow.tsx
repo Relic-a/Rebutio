@@ -42,6 +42,7 @@ export function DebateFlow({
   const [slowResponse, setSlowResponse] = useState(false);
   const [turnError, setTurnError] = useState<string | null>(null);
   const [micDenied, setMicDenied] = useState(false);
+  const [manualTextMode, setManualTextMode] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [reviewBeforeSend, setReviewBeforeSend] = useState(true);
   const [transcript, setTranscript] = useState<{ speaker: Speaker; text: string }[]>(() =>
@@ -269,7 +270,19 @@ export function DebateFlow({
       }
     } catch (err: any) {
       logger.error("debate_flow.submit_turn_failed", { turnNumber, requestId: err?.requestId }, err);
-      setTurnError("Couldn't send that turn. Try again.");
+      const isNoSpeech =
+        err?.status === 422 ||
+        err?.status === 400 ||
+        /speech|microphone|mic|volume|silent/i.test(err?.message || "");
+
+      const errorMessage =
+        err?.message && !err.message.startsWith("API error") && !err.message.startsWith("Turn submission failed")
+          ? err.message
+          : isNoSpeech
+          ? "No speech detected in your recording. Please check your microphone, check your input volume, and try speaking again."
+          : "Couldn't send that turn. Please check your connection and try again.";
+
+      setTurnError(errorMessage);
       setPhase("reviewing-clip");
     }
   }
@@ -283,7 +296,13 @@ export function DebateFlow({
     setOpponentAudioAvailable(false);
     setOpponentAudioUrl(null);
     setClip(null);
+    setClipUrl((old) => {
+      if (old) URL.revokeObjectURL(old);
+      return null;
+    });
     setTurnText(null);
+    setTurnError(null);
+    setManualTextMode(false);
     setTurnNumber((n) => Math.min(n + 1, total));
     setPhase("turn");
   }
@@ -346,21 +365,47 @@ export function DebateFlow({
 
               {phase === "turn" && (
                 <div className="flex flex-1 flex-col items-center justify-center gap-6">
-                  {micDenied ? (
-                    <TextFallback onSend={(t) => { setClip(null); setTurnText(t); setPhase("reviewing-clip"); }} />
+                  {micDenied || manualTextMode ? (
+                    <>
+                      <TextFallback
+                        onSend={(t) => {
+                          setClip(null);
+                          setTurnText(t);
+                          setPhase("reviewing-clip");
+                        }}
+                      />
+                      {!micDenied && (
+                        <button
+                          type="button"
+                          onClick={() => setManualTextMode(false)}
+                          className="text-xs font-semibold text-rally underline underline-offset-4 hover:text-rally-deep"
+                        >
+                          Switch back to microphone
+                        </button>
+                      )}
+                    </>
                   ) : (
                     <>
                       <MicButton onClick={startRecording} label="Start speaking" />
                       <p className="text-sm text-ink-soft">Tap the mic and make your point. Take your time.</p>
-                      <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-ink-soft">
-                        <input
-                          type="checkbox"
-                          checked={reviewBeforeSend}
-                          onChange={(e) => setReviewBeforeSend(e.target.checked)}
-                          className="h-4 w-4 accent-rally"
-                        />
-                        Review clip before sending
-                      </label>
+                      <div className="flex flex-col items-center gap-2">
+                        <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-ink-soft">
+                          <input
+                            type="checkbox"
+                            checked={reviewBeforeSend}
+                            onChange={(e) => setReviewBeforeSend(e.target.checked)}
+                            className="h-4 w-4 accent-rally"
+                          />
+                          Review clip before sending
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setManualTextMode(true)}
+                          className="text-xs text-ink-soft/70 underline underline-offset-4 hover:text-ink"
+                        >
+                          Type instead of speaking
+                        </button>
+                      </div>
                     </>
                   )}
                 </div>
@@ -384,15 +429,45 @@ export function DebateFlow({
                     <p className="text-sm text-ink-soft">Recorded without audio capture.</p>
                   )}
                   {turnError && (
-                    <p role="alert" className="rounded-2xl bg-coral-soft px-4 py-2 text-sm font-medium text-coral">
-                      {turnError}
-                    </p>
+                    <div role="alert" className="w-full max-w-xs rounded-2xl bg-coral-soft px-4 py-3 text-center text-sm font-medium text-coral">
+                      <p>{turnError}</p>
+                    </div>
                   )}
                   <div className="mt-2 flex w-full max-w-xs flex-col gap-3">
-                    <PrimaryButton onClick={submitTurn}>{lastTurn ? "Send final turn" : "Send turn"}</PrimaryButton>
-                    <button onClick={() => setPhase("turn")} className="text-sm font-medium text-ink-soft underline underline-offset-4">
-                      Re-record
+                    <PrimaryButton onClick={() => submitTurn()}>{lastTurn ? "Send final turn" : "Send turn"}</PrimaryButton>
+                    <button
+                      onClick={() => {
+                        setTurnError(null);
+                        setClip(null);
+                        setClipUrl((old) => {
+                          if (old) URL.revokeObjectURL(old);
+                          return null;
+                        });
+                        setTurnText(null);
+                        setPhase("turn");
+                      }}
+                      className="text-sm font-medium text-ink-soft underline underline-offset-4"
+                    >
+                      Re-record turn
                     </button>
+                    {!turnText && (
+                      <button
+                        onClick={() => {
+                          setTurnError(null);
+                          setClip(null);
+                          setClipUrl((old) => {
+                            if (old) URL.revokeObjectURL(old);
+                            return null;
+                          });
+                          setTurnText(null);
+                          setManualTextMode(true);
+                          setPhase("turn");
+                        }}
+                        className="text-xs text-ink-soft/70 underline underline-offset-4 hover:text-ink"
+                      >
+                        Or type your point instead
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

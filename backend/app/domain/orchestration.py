@@ -3,6 +3,7 @@ import datetime
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Set
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.config import settings
@@ -115,21 +116,34 @@ class DebateOrchestrator:
                     )
                 )
             else:
-                user_transcript = transcript or "I maintain my position based on the evidence presented."
+                user_transcript = (transcript or "").strip()
 
             if mai_task is not None:
                 try:
                     user_transcript = await mai_task
-                    if not user_transcript and transcript:
-                        user_transcript = transcript
-                    elif not user_transcript:
-                        user_transcript = "I maintain my position on this issue."
                 except Exception as e:
                     logger.error("speech.transcription.failed", error=str(e))
-                    if transcript:
-                        user_transcript = transcript
+                    if transcript and transcript.strip():
+                        user_transcript = transcript.strip()
                     else:
-                        raise RuntimeError("Transcription failed. Please retry your turn.") from e
+                        raise HTTPException(
+                            status_code=502,
+                            detail="Transcription service is temporarily unavailable. Please try again or switch to text input.",
+                        ) from e
+
+            # Clean and validate transcript text
+            clean_transcript = (user_transcript or "").strip()
+            if not clean_transcript and transcript and transcript.strip():
+                clean_transcript = transcript.strip()
+
+            if not clean_transcript:
+                logger.warning("speech.transcription.no_speech_detected", turn_number=turn_num, session_id=session_id)
+                raise HTTPException(
+                    status_code=422,
+                    detail="No speech detected in your recording. Please check your microphone, check your input volume, and try speaking again.",
+                )
+
+            user_transcript = clean_transcript
 
             # Save user turn record
             user_turn_record = await session_repo.save_turn(

@@ -70,6 +70,21 @@ export type AppService = {
 // HTTP Implementation (Production / Local Backend)
 // ---------------------------------------------------------------------------
 
+function parseErrorDetail(errText: string, defaultText: string): string {
+  try {
+    const parsed = JSON.parse(errText);
+    if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+      return parsed.detail.trim();
+    }
+    if (typeof parsed.message === "string" && parsed.message.trim()) {
+      return parsed.message.trim();
+    }
+  } catch {
+    // not JSON
+  }
+  return errText || defaultText;
+}
+
 export function createHttpService(baseUrl: string = ""): AppService {
   const apiBase = baseUrl ? baseUrl.replace(/\/+$/, "") : "";
 
@@ -92,10 +107,12 @@ export function createHttpService(baseUrl: string = ""): AppService {
 
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
-        logger.error("api.request.failed", { path, status: res.status, requestId: reqId }, new Error(errText || res.statusText));
-        const error = new Error(`API error ${res.status}: ${errText || res.statusText}`);
+        const errMsg = parseErrorDetail(errText, res.statusText || `Request failed (${res.status})`);
+        logger.error("api.request.failed", { path, status: res.status, requestId: reqId }, new Error(errMsg));
+        const error = new Error(errMsg);
         (error as any).requestId = reqId;
         (error as any).status = res.status;
+        (error as any).detail = errMsg;
         throw error;
       }
 
@@ -170,10 +187,12 @@ export function createHttpService(baseUrl: string = ""): AppService {
 
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
-        logger.error("api.turn_submission.failed", { sessionId: session.id, status: res.status, requestId: reqId }, new Error(errText || res.statusText));
-        const error = new Error(`Turn submission failed: ${errText || res.statusText}`);
+        const errMsg = parseErrorDetail(errText, res.statusText || `Turn submission failed (${res.status})`);
+        logger.error("api.turn_submission.failed", { sessionId: session.id, status: res.status, requestId: reqId }, new Error(errMsg));
+        const error = new Error(errMsg);
         (error as any).requestId = reqId;
         (error as any).status = res.status;
+        (error as any).detail = errMsg;
         throw error;
       }
 

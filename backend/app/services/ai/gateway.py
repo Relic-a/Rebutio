@@ -97,19 +97,29 @@ class AIGateway:
                             model=cand.model_id,
                         )
                         dur_ms = round((time.perf_counter() - t_start) * 1000, 2)
-                        if text:
-                            char_count = len(text)
-                            word_count = len(text.split())
-                            logger.info(
-                                "speech.transcription.completed",
-                                duration_ms=dur_ms,
-                                audio_size_bytes=audio_size_bytes,
-                                transcript_char_count=char_count,
-                                transcript_word_count=word_count,
-                            )
-                            if settings.LOG_AI_CONTENT:
-                                logger.debug("speech.transcription.content", debug_snippet=format_sensitive_debug(text))
-                            return text
+                        if text is not None:
+                            cleaned_text = text.strip()
+                            if cleaned_text:
+                                char_count = len(cleaned_text)
+                                word_count = len(cleaned_text.split())
+                                logger.info(
+                                    "speech.transcription.completed",
+                                    duration_ms=dur_ms,
+                                    audio_size_bytes=audio_size_bytes,
+                                    transcript_char_count=char_count,
+                                    transcript_word_count=word_count,
+                                )
+                                if settings.LOG_AI_CONTENT:
+                                    logger.debug("speech.transcription.content", debug_snippet=format_sensitive_debug(cleaned_text))
+                                return cleaned_text
+                            else:
+                                logger.info(
+                                    "speech.transcription.empty",
+                                    duration_ms=dur_ms,
+                                    audio_size_bytes=audio_size_bytes,
+                                    reason="no_speech_detected_in_audio",
+                                )
+                                return ""
                     except Exception as e:
                         last_error = e
 

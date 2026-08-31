@@ -150,3 +150,44 @@ async def test_oversized_audio_upload_rejection():
         assert turn_resp.status_code == 400
         assert "25MB" in turn_resp.json()["detail"]
 
+
+@pytest.mark.asyncio
+async def test_empty_transcription_returns_422_with_mic_check_message(monkeypatch):
+    from backend.app.services.ai.gateway import ai_gateway
+
+    async def mock_empty_stt(*args, **kwargs):
+        return ""
+
+    monkeypatch.setattr(ai_gateway, "transcribe_audio", mock_empty_stt)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/api/debates/start", json={"side": "agree"})
+        session_id = resp.json()["session"]["id"]
+
+        dummy_audio = b"RIFFfakeaudiobytes"
+        files = {"audio": ("turn.webm", dummy_audio, "audio/webm")}
+
+        turn_resp = await client.post(
+            f"/api/sessions/{session_id}/turns",
+            files=files,
+        )
+        assert turn_resp.status_code == 422
+        detail = turn_resp.json()["detail"]
+        assert "No speech detected" in detail
+        assert "microphone" in detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_empty_submission_without_audio_or_text_returns_422():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/api/debates/start", json={"side": "agree"})
+        session_id = resp.json()["session"]["id"]
+
+        turn_resp = await client.post(
+            f"/api/sessions/{session_id}/turns",
+            data={},
+        )
+        assert turn_resp.status_code == 422
+        assert "No speech detected" in turn_resp.json()["detail"]
+
+
