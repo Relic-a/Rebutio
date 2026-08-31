@@ -78,50 +78,70 @@ class AIGateway:
 
         for cand in candidates:
             if cand.provider == ProviderType.OPENROUTER and self.openrouter.is_configured:
-                for attempt in range(2):
-                    if attempt > 0:
-                        logger.warning(
-                            "provider.retry",
-                            role=ModelRole.TRANSCRIPTION.value,
-                            provider="openrouter",
-                            model=cand.model_id,
-                            attempt=attempt + 1,
-                            max_attempts=2,
-                            reason=str(last_error) if last_error else "transient_error",
-                        )
-                    try:
-                        t_start = time.perf_counter()
-                        text = await self.openrouter.transcribe_audio(
-                            audio_bytes=audio_bytes,
-                            audio_format=audio_format,
-                            model=cand.model_id,
-                        )
-                        dur_ms = round((time.perf_counter() - t_start) * 1000, 2)
-                        if text is not None:
-                            cleaned_text = text.strip()
-                            if cleaned_text:
-                                char_count = len(cleaned_text)
-                                word_count = len(cleaned_text.split())
-                                logger.info(
-                                    "speech.transcription.completed",
-                                    duration_ms=dur_ms,
-                                    audio_size_bytes=audio_size_bytes,
-                                    transcript_char_count=char_count,
-                                    transcript_word_count=word_count,
-                                )
-                                if settings.LOG_AI_CONTENT:
-                                    logger.debug("speech.transcription.content", debug_snippet=format_sensitive_debug(cleaned_text))
-                                return cleaned_text
-                            else:
-                                logger.info(
-                                    "speech.transcription.empty",
-                                    duration_ms=dur_ms,
-                                    audio_size_bytes=audio_size_bytes,
-                                    reason="no_speech_detected_in_audio",
-                                )
-                                return ""
-                    except Exception as e:
-                        last_error = e
+                try:
+                    t_start = time.perf_counter()
+                    text = await self.openrouter.transcribe_audio(
+                        audio_bytes=audio_bytes,
+                        audio_format=audio_format,
+                        model=cand.model_id,
+                    )
+                    dur_ms = round((time.perf_counter() - t_start) * 1000, 2)
+                    if text is not None:
+                        cleaned_text = text.strip()
+                        if cleaned_text:
+                            char_count = len(cleaned_text)
+                            word_count = len(cleaned_text.split())
+                            logger.info(
+                                "speech.transcription.completed",
+                                duration_ms=dur_ms,
+                                audio_size_bytes=audio_size_bytes,
+                                transcript_char_count=char_count,
+                                transcript_word_count=word_count,
+                            )
+                            if settings.LOG_AI_CONTENT:
+                                logger.debug("speech.transcription.content", debug_snippet=format_sensitive_debug(cleaned_text))
+                            return cleaned_text
+                        else:
+                            logger.info(
+                                "speech.transcription.empty",
+                                duration_ms=dur_ms,
+                                audio_size_bytes=audio_size_bytes,
+                                reason="no_speech_detected_in_audio",
+                            )
+                            return ""
+                except Exception as e:
+                    last_error = e
+
+        # Try local STT fallback if cloud STT failed
+        try:
+            from backend.app.services.speech.local_stt import local_stt_client
+            logger.warning(
+                "ai.provider_fallback",
+                role=ModelRole.TRANSCRIPTION.value,
+                from_provider="openrouter",
+                to_provider="local_whisper",
+                reason=str(last_error) if last_error else "provider_unavailable",
+            )
+            t_start = time.perf_counter()
+            local_text = await local_stt_client.transcribe_audio(audio_bytes, audio_format=audio_format)
+            dur_ms = round((time.perf_counter() - t_start) * 1000, 2)
+            if local_text:
+                cleaned_text = local_text.strip()
+                char_count = len(cleaned_text)
+                word_count = len(cleaned_text.split())
+                logger.info(
+                    "speech.transcription.completed",
+                    provider="local_whisper",
+                    duration_ms=dur_ms,
+                    audio_size_bytes=audio_size_bytes,
+                    transcript_char_count=char_count,
+                    transcript_word_count=word_count,
+                )
+                if settings.LOG_AI_CONTENT:
+                    logger.debug("speech.transcription.content", debug_snippet=format_sensitive_debug(cleaned_text))
+                return cleaned_text
+        except Exception as local_err:
+            logger.warning("speech.transcription.local_fallback_failed", error=str(local_err))
 
         dur_ms = round((time.perf_counter() - start_time) * 1000, 2)
         logger.error(

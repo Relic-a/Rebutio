@@ -12,9 +12,11 @@ from backend.app.services.ai.config import AICompletionResult
 from backend.app.services.ai.gateway import ai_gateway
 
 
+import asyncio
+
 @pytest.fixture(autouse=True)
-async def ensure_db():
-    await init_db()
+def ensure_db():
+    asyncio.run(init_db())
 
 
 def test_build_opponent_prompt_anchoring():

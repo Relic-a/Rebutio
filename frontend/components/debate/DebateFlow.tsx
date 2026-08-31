@@ -37,6 +37,7 @@ export function DebateFlow({
   const [opponentAudioUrl, setOpponentAudioUrl] = useState<string | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [clip, setClip] = useState<Blob | null>(null);
+  const clipRef = useRef<Blob | null>(null);
   const [turnText, setTurnText] = useState<string | null>(null);
   const [clipUrl, setClipUrl] = useState<string | null>(null);
   const [slowResponse, setSlowResponse] = useState(false);
@@ -185,8 +186,9 @@ export function DebateFlow({
   async function stopRecording() {
     try {
       const blob = await capture.stopRecording();
+      clipRef.current = blob;
+      setClip(blob);
       if (blob) {
-        setClip(blob);
         setClipUrl((old) => {
           if (old) URL.revokeObjectURL(old);
           return URL.createObjectURL(blob);
@@ -207,7 +209,7 @@ export function DebateFlow({
   }
 
   async function submitTurn(clipOverride?: Blob | null) {
-    const clipToSend = clipOverride !== undefined ? clipOverride : clip;
+    const clipToSend = clipOverride !== undefined ? clipOverride : (clipRef.current ?? clip);
     sessionRef.current = { ...sessionRef.current, currentTurn: turnNumber };
     try {
       // intentional pacing: "Point submitted" beat, then thinking state
@@ -215,7 +217,12 @@ export function DebateFlow({
       setPhase("submitted");
       await new Promise((r) => setTimeout(r, reduceMotion ? 300 : 900));
       setPhase("thinking");
-      logger.info("debate_flow.turn_submitted", { turnNumber, sessionId: sessionRef.current.id });
+      logger.info("debate_flow.turn_submitted", {
+        turnNumber,
+        sessionId: sessionRef.current.id,
+        audioSize: clipToSend?.size ?? 0,
+        hasAudio: Boolean(clipToSend),
+      });
       const res = await appService.submitUserTurn(sessionRef.current, {
         audio: clipToSend ?? undefined,
         transcript: turnText ?? undefined,
@@ -296,6 +303,7 @@ export function DebateFlow({
     setOpponentAudioAvailable(false);
     setOpponentAudioUrl(null);
     setClip(null);
+    clipRef.current = null;
     setClipUrl((old) => {
       if (old) URL.revokeObjectURL(old);
       return null;
@@ -639,7 +647,7 @@ function MicButton({ recording, onClick, label, elapsed }: { recording?: boolean
       className="relative flex h-32 w-32 items-center justify-center rounded-full bg-rally text-white shadow-[0_10px_30px_rgba(18,122,99,0.35)]"
     >
       {recording && !reduceMotion && (
-        <span className="absolute inset-0 animate-ping rounded-full bg-rally/30" aria-hidden />
+        <span className="pointer-events-none absolute inset-0 animate-ping rounded-full bg-rally/30" aria-hidden />
       )}
       <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
         <rect x="9" y="2.5" width="6" height="12" rx="3" />

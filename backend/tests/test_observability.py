@@ -32,8 +32,8 @@ from backend.app.persistence.db import init_db
 
 
 @pytest.fixture(autouse=True)
-async def ensure_db():
-    await init_db()
+def ensure_db():
+    asyncio.run(init_db())
 
 
 def test_redaction_secrets_and_preservation_of_token_metrics():

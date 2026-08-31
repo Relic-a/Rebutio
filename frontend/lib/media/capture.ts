@@ -46,21 +46,27 @@ class BrowserCapture implements CaptureAdapter {
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.chunks = [];
     this.recorder = new MediaRecorder(this.stream);
-    this.recorder.ondataavailable = (e) => e.data.size > 0 && this.chunks.push(e.data);
-    this.recorder.start();
+    this.recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        this.chunks.push(e.data);
+      }
+    };
+    this.recorder.start(100);
   }
 
   async stopRecording(): Promise<Blob | null> {
     return new Promise((resolve) => {
       if (!this.recorder || this.recorder.state === "inactive") return resolve(null);
-      this.recorder.onstop = () => {
-        const blob = new Blob(this.chunks, { type: this.recorder?.mimeType || "audio/webm" });
+      const rec = this.recorder;
+      rec.onstop = () => {
+        const mime = rec.mimeType || "audio/webm";
+        const blob = new Blob(this.chunks, { type: mime });
         this.stream?.getTracks().forEach((t) => t.stop());
         this.stream = null;
         this.recorder = null;
         resolve(blob);
       };
-      this.recorder.stop();
+      rec.stop();
     });
   }
 

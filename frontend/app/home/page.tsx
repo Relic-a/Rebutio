@@ -22,7 +22,11 @@ export default function HomePage() {
   const [dailyTopic, setDailyTopic] = useState<(typeof mockDebateTopics)[number] | null>(null);
 
   useEffect(() => {
-    if (!onboarded) router.replace("/onboarding");
+    if (!onboarded) {
+      appService.getAppBootstrap().then((b) => {
+        if (!b.onboarded) router.replace("/onboarding");
+      }).catch(() => router.replace("/onboarding"));
+    }
     appService.getDebateChoices().then((t) => {
       const day = new Date().getDate();
       setDailyTopic(t[day % t.length]);

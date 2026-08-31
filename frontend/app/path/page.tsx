@@ -21,7 +21,11 @@ export default function PathPage() {
   const [livePath, setLivePath] = useState<LearningPath | null>(null);
 
   useEffect(() => {
-    if (!onboarded) router.replace("/onboarding");
+    if (!onboarded) {
+      appService.getAppBootstrap().then((b) => {
+        if (!b.onboarded) router.replace("/onboarding");
+      }).catch(() => router.replace("/onboarding"));
+    }
     appService.getLearningPath().then((p) => setLivePath(p)).catch(() => {});
   }, [onboarded, router]);
 

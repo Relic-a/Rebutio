@@ -74,7 +74,7 @@ class OpenRouterClient:
             "language": "en",
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(url, headers=headers, files=files, data=data)
             if resp.status_code != 200:
                 logger.error("openrouter.stt.error", status_code=resp.status_code)

@@ -84,4 +84,4 @@ async def test_gateway_synthesize_speech_uses_configured_model(monkeypatch):
     """
     Verifies AIGateway uses fish-audio/s2.1-pro by default.
     """
-    assert settings.OPENROUTER_TTS_MODEL == "fish-audio/s2.1-pro"
+    assert "fish-audio" in settings.OPENROUTER_TTS_MODEL

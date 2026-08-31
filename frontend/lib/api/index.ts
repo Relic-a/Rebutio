@@ -396,6 +396,6 @@ function skillHint(id: string): string {
 }
 
 const isMock = process.env.NEXT_PUBLIC_USE_MOCK_API === "true";
-const apiHost = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const apiHost = process.env.NEXT_PUBLIC_API_URL ?? (typeof window !== "undefined" ? "" : "http://localhost:8000");
 
 export const appService: AppService = isMock ? createMockService() : createHttpService(apiHost);
