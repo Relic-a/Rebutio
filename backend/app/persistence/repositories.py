@@ -613,8 +613,8 @@ class CoachRepository:
         )
         self.db.add(thread)
         await self.db.commit()
-        await self.db.refresh(thread)
-        return thread
+        loaded = await self.get_thread(user_id, thread_id)
+        return loaded if loaded is not None else thread
 
     async def create_general_thread(self, user_id: str, title: str = "General Coaching") -> CoachThread:
         thread_id = f"thread-gen-{uuid.uuid4().hex[:8]}"
@@ -629,8 +629,8 @@ class CoachRepository:
         )
         self.db.add(thread)
         await self.db.commit()
-        await self.db.refresh(thread)
-        return thread
+        loaded = await self.get_thread(user_id, thread_id)
+        return loaded if loaded is not None else thread
 
     async def get_thread(self, user_id: str, thread_id: str) -> Optional[CoachThread]:
         stmt = (

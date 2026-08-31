@@ -153,9 +153,14 @@ async function run() {
     // -------------------------------------------------------------------------
     console.log("3. Concluding debate and verifying Results Screen...");
     page.on("dialog", (dialog) => dialog.accept());
-    const finishBtn = page.locator("button:has-text('Finish')");
+    const finishBtn = page.locator("button:has-text('Finish')").first();
     if (await finishBtn.isVisible()) {
       await finishBtn.click();
+      await page.waitForTimeout(300);
+      const confirmModalBtn = page.locator("button:has-text('Finish & Review')");
+      if (await confirmModalBtn.isVisible()) {
+        await confirmModalBtn.click();
+      }
     }
 
     await page.waitForURL("**/results*", { timeout: 20000 });

@@ -129,6 +129,23 @@ async def test_coach_home_and_session_thread_flow():
     assert res_corr.status_code == 200
     assert res_corr.json()["success"] is True
 
+    # 5. Session-specific Coach thread (/api/coach/session/{session_id})
+    res_deb = client.post(
+        "/api/debates/start",
+        json={"side": "agree"},
+        cookies=cookies,
+    )
+    assert res_deb.status_code == 200
+    sess_id = res_deb.json()["session"]["id"]
+
+    res_sess_coach = client.get(f"/api/coach/session/{sess_id}", cookies=cookies)
+    assert res_sess_coach.status_code == 200
+    sess_coach_data = res_sess_coach.json()
+    assert sess_coach_data["thread"]["sessionId"] == sess_id
+    assert sess_coach_data["thread"]["threadType"] == "debate_review"
+    assert len(sess_coach_data["messages"]) >= 1
+    assert sess_coach_data["debateSession"]["id"] == sess_id
+
 
 @pytest.mark.asyncio
 async def test_coach_audio_single_user_message_and_tool_loop():

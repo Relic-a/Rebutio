@@ -68,7 +68,7 @@ async def get_or_create_session_coach_thread(
     debate_session_schema = None
     if session:
         turns = []
-        for t in session.turns:
+        for t in (session.turns or []):
             txt = encryptor.decrypt_str(t.text_encrypted) if t.text_encrypted else ""
             turns.append({
                 "id": t.id,
@@ -84,14 +84,14 @@ async def get_or_create_session_coach_thread(
         debate_session_schema = DebateSessionSchema(
             id=session.id,
             topic=session.topic_text,
-            skillTarget={"id": session.skill_id, "name": session.skill_name, "hint": session.skill_reminder},
-            difficulty=session.difficulty,
-            userSide=session.user_side,
-            totalUserTurns=session.total_user_turns,
-            currentTurn=session.current_turn,
-            status=session.status,
+            skillTarget={"id": session.skill_id or "direct_rebuttal", "name": session.skill_name or "Direct Rebuttal", "hint": session.skill_reminder or ""},
+            difficulty=session.difficulty or "steady",
+            userSide=session.user_side or "agree",
+            totalUserTurns=session.total_user_turns or 3,
+            currentTurn=session.current_turn or 1,
+            status=session.status or "finished",
             turns=turns,
-            skillReminder=session.skill_reminder,
+            skillReminder=session.skill_reminder or "",
         )
 
     debate_review_schema = None

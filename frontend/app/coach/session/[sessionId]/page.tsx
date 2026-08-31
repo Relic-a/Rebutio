@@ -277,7 +277,7 @@ export default function SessionCoachPage() {
                   )}
 
                   {/* Standard Message Bubble */}
-                  {m.text && m.messageType !== "opening_analysis" && (
+                  {m.text && (m.messageType !== "opening_analysis" || !m.openingAnalysis) && (
                     <div className="flex items-end gap-2 max-w-[85%]">
                       {isCoach && (
                         <div className="w-7 h-7 rounded-full bg-rally flex items-center justify-center text-white text-xs font-bold shrink-0 mb-1">

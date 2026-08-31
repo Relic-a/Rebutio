@@ -110,7 +110,8 @@ class CoachEngine:
         )
 
         # If thread is brand new without messages, generate proactive opening analysis
-        if not thread.messages:
+        existing_messages = await coach_repo.get_thread_messages(thread.id)
+        if not existing_messages:
             logger.info("coach.opening_analysis.generating", session_id=session.id, thread_id=thread.id)
             review = await sess_repo.get_review(session.id)
             memories = await coach_repo.get_longitudinal_memory(user_id)
@@ -327,7 +328,8 @@ class CoachEngine:
         ]
 
         history_msgs = []
-        for m in thread.messages:
+        thread_messages = await coach_repo.get_thread_messages(thread.id)
+        for m in thread_messages:
             txt = encryptor.decrypt_str(m.text_encrypted) if m.text_encrypted else ""
             history_msgs.append({
                 "sender": m.sender,

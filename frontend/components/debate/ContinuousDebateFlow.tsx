@@ -66,12 +66,27 @@ export function ContinuousDebateFlow({
   const [turnError, setTurnError] = useState<string | null>(null);
   const [activeAudioPlaying, setActiveAudioPlaying] = useState<string | null>(null);
   const [elapsedDebateTime, setElapsedDebateTime] = useState(0);
+  const [showFinishModal, setShowFinishModal] = useState(false);
+  const [isFinishing, setIsFinishing] = useState(false);
 
   const turnsScrollRef = useRef<HTMLDivElement | null>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const currentSessionRef = useRef<DebateSession>(session);
   const submissionInFlightRef = useRef(false);
+
+  const handleConfirmFinish = async () => {
+    setIsFinishing(true);
+    try {
+      await appService.finishDebate(session);
+      const review = await appService.getDebateReview(session.id);
+      onFinish(review);
+    } catch (err) {
+      logger.error("debate.finish_failed", { error: String(err) });
+      setIsFinishing(false);
+      setShowFinishModal(false);
+    }
+  };
 
   noteCurrentSession(session);
 
@@ -341,13 +356,7 @@ export function ContinuousDebateFlow({
           </div>
 
           <button
-            onClick={() => {
-              if (confirm("Conclude this debate and review your performance now?")) {
-                appService.finishDebate(session).then(() => {
-                  appService.getDebateReview(session.id).then(onFinish);
-                });
-              }
-            }}
+            onClick={() => setShowFinishModal(true)}
             className="rounded-full bg-ink/5 px-3 py-1 text-xs font-semibold text-ink hover:bg-coral/10 hover:text-coral transition-colors"
             title="Conclude debate"
           >
@@ -579,6 +588,63 @@ export function ContinuousDebateFlow({
           </div>
         )}
       </footer>
+
+      {/* In-App Finish Confirmation Modal */}
+      <AnimatePresence>
+        {showFinishModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl border border-ink/10"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rally-mist text-rally">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                    <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+                    <line x1="4" y1="22" x2="4" y2="15" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-ink">Conclude Debate?</h3>
+                  <p className="text-xs text-ink-soft">Review your score and coaching notes</p>
+                </div>
+              </div>
+
+              <p className="mt-3 text-xs text-ink leading-relaxed">
+                Are you ready to wrap up this debate on <span className="font-semibold text-ink">&ldquo;{session.topic}&rdquo;</span> and proceed to your full performance review?
+              </p>
+
+              <div className="mt-5 flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowFinishModal(false)}
+                  disabled={isFinishing}
+                  className="rounded-xl px-3 py-2 text-xs font-semibold text-ink-soft hover:bg-ink/5 hover:text-ink transition-colors disabled:opacity-50"
+                >
+                  Keep Sparring
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmFinish}
+                  disabled={isFinishing}
+                  className="rounded-xl bg-rally px-4 py-2 text-xs font-bold text-white shadow hover:bg-rally/90 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {isFinishing ? (
+                    <>
+                      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      <span>Wrapping up...</span>
+                    </>
+                  ) : (
+                    <span>Finish & Review</span>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </main>
   );
 }
