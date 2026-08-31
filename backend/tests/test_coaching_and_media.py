@@ -8,7 +8,6 @@ from backend.app.models.schemas import (
     CoachOpeningAnalysisResult,
     CoachTurnResponse,
     DebateReviewerResult,
-    OpponentMoveResponse,
 )
 from backend.app.services.ai.config import AICompletionResult
 from backend.app.services.ai.gateway import ai_gateway

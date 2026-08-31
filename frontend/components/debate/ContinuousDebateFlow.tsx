@@ -246,7 +246,7 @@ export function ContinuousDebateFlow({
           text: result.opponentTurn.text,
           audioUrl: result.opponentTurn.playback?.audioUrl,
           durationSec: result.opponentTurn.durationSec,
-          move: result.opponentTurn.move || "Challenging your stance",
+          move: result.opponentTurn.move,
           timestamp: Date.now(),
         };
 
