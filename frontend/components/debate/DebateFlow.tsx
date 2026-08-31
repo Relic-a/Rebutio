@@ -43,9 +43,11 @@ export function DebateFlow({
   const [turnError, setTurnError] = useState<string | null>(null);
   const [micDenied, setMicDenied] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [reviewBeforeSend, setReviewBeforeSend] = useState(true);
   const opponentReadyTimestampRef = useRef<number>(Date.now());
   const delayMsRef = useRef<number>(0);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const autoAdvanceTimerRef = useRef<number | null>(null);
   const sessionRef = useRef<DebateSession>(session);
   noteCurrentSession(session);
 
@@ -75,29 +77,66 @@ export function DebateFlow({
     return () => clearInterval(iv);
   }, [phase]);
 
+  function clearAutoAdvance() {
+    if (autoAdvanceTimerRef.current !== null) {
+      window.clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+  }
+
+  /** After the opponent's voice finishes, the rally flows straight back to the user's mic. */
+  function scheduleAutoAdvance() {
+    clearAutoAdvance();
+    autoAdvanceTimerRef.current = window.setTimeout(() => {
+      autoAdvanceTimerRef.current = null;
+      nextTurn();
+    }, reduceMotion ? 300 : 1200);
+  }
+
+  function attachAudioHandlers(audio: HTMLAudioElement) {
+    audio.onplay = () => {
+      setIsPlayingAudio(true);
+      clearAutoAdvance();
+      logger.debug("debate_flow.opponent_audio_play_started", { turnNumber });
+    };
+    audio.onpause = () => {
+      setIsPlayingAudio(false);
+      clearAutoAdvance();
+    };
+    audio.onended = () => {
+      setIsPlayingAudio(false);
+      opponentReadyTimestampRef.current = Date.now();
+      logger.debug("debate_flow.opponent_audio_play_ended", { turnNumber });
+      scheduleAutoAdvance();
+    };
+    audio.onerror = () => {
+      logger.warn("debate_flow.opponent_audio_play_failed", { turnNumber });
+      setIsPlayingAudio(false);
+    };
+  }
+
+  function prepareAudio(url: string, autoplay: boolean) {
+    audioPlayerRef.current?.pause();
+    const audio = new Audio(url);
+    audioPlayerRef.current = audio;
+    attachAudioHandlers(audio);
+    if (autoplay) {
+      audio.play().catch(() => {
+        logger.warn("debate_flow.opponent_audio_autoplay_blocked", { turnNumber });
+        setIsPlayingAudio(false);
+      });
+    }
+  }
+
   function toggleOpponentAudio() {
     if (!opponentAudioUrl) return;
 
     if (!audioPlayerRef.current) {
-      const audio = new Audio(opponentAudioUrl);
-      audioPlayerRef.current = audio;
-      audio.onplay = () => {
-        setIsPlayingAudio(true);
-        logger.debug("debate_flow.opponent_audio_play_started", { turnNumber });
-      };
-      audio.onpause = () => setIsPlayingAudio(false);
-      audio.onended = () => {
-        setIsPlayingAudio(false);
-        opponentReadyTimestampRef.current = Date.now();
-        logger.debug("debate_flow.opponent_audio_play_ended", { turnNumber });
-      };
-      audio.onerror = () => {
-        logger.warn("debate_flow.opponent_audio_play_failed", { turnNumber });
-        setIsPlayingAudio(false);
-      };
+      prepareAudio(opponentAudioUrl, false);
     }
 
     const audio = audioPlayerRef.current;
+    if (!audio) return;
     if (!audio.paused) {
       audio.pause();
       logger.debug("debate_flow.opponent_audio_paused", { turnNumber });
@@ -110,16 +149,8 @@ export function DebateFlow({
     });
   }
 
-  useEffect(() => {
-    const audio = audioPlayerRef.current;
-    if (audio) {
-      audio.pause();
-      audioPlayerRef.current = null;
-    }
-    setIsPlayingAudio(false);
-  }, [opponentAudioUrl]);
-
   useEffect(() => () => {
+    clearAutoAdvance();
     audioPlayerRef.current?.pause();
     audioPlayerRef.current = null;
   }, []);
@@ -148,6 +179,11 @@ export function DebateFlow({
           return URL.createObjectURL(blob);
         });
       }
+      if (blob && !reviewBeforeSend) {
+        logger.info("debate_flow.auto_send_enabled", { turnNumber });
+        await submitTurn(blob);
+        return;
+      }
       setPhase("reviewing-clip");
       logger.info("debate_flow.recording_stopped", { turnNumber });
     } catch (err) {
@@ -157,7 +193,8 @@ export function DebateFlow({
     }
   }
 
-  async function submitTurn() {
+  async function submitTurn(clipOverride?: Blob | null) {
+    const clipToSend = clipOverride !== undefined ? clipOverride : clip;
     sessionRef.current = { ...sessionRef.current, currentTurn: turnNumber };
     try {
       // intentional pacing: "Point submitted" beat, then thinking state
@@ -167,7 +204,7 @@ export function DebateFlow({
       setPhase("thinking");
       logger.info("debate_flow.turn_submitted", { turnNumber, sessionId: sessionRef.current.id });
       const res = await appService.submitUserTurn(sessionRef.current, {
-        audio: clip ?? undefined,
+        audio: clipToSend ?? undefined,
         transcript: turnText ?? undefined,
         clientResponseDelayMs: delayMsRef.current,
       });
@@ -183,6 +220,10 @@ export function DebateFlow({
         setOpponentLine(res.opponentTurn.text ?? null);
         setOpponentAudioAvailable(Boolean(res.opponentTurn.playback?.available));
         setOpponentAudioUrl(res.opponentTurn.playback?.audioUrl ?? null);
+        if (res.opponentTurn.playback?.available && res.opponentTurn.playback?.audioUrl) {
+          // Voice-first: Rebutio speaks immediately; the play button stays as a pause/resume control.
+          prepareAudio(res.opponentTurn.playback.audioUrl, true);
+        }
       }
       opponentReadyTimestampRef.current = Date.now();
       if (res.finished) {
@@ -218,6 +259,7 @@ export function DebateFlow({
   }
 
   function nextTurn() {
+    clearAutoAdvance();
     audioPlayerRef.current?.pause();
     audioPlayerRef.current = null;
     setIsPlayingAudio(false);
@@ -282,6 +324,15 @@ export function DebateFlow({
                     <>
                       <MicButton onClick={startRecording} label="Start speaking" />
                       <p className="text-sm text-ink-soft">Tap the mic and make your point. Take your time.</p>
+                      <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-ink-soft">
+                        <input
+                          type="checkbox"
+                          checked={reviewBeforeSend}
+                          onChange={(e) => setReviewBeforeSend(e.target.checked)}
+                          className="h-4 w-4 accent-rally"
+                        />
+                        Review clip before sending
+                      </label>
                     </>
                   )}
                 </div>
