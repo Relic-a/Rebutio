@@ -1,5 +1,5 @@
 import json
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 FINAL_PATCH_SYSTEM_PROMPT = """You are Luna, updating the comprehensive linguistic analysis with evidence from the learner's FINAL debate turn.
 
