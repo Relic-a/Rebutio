@@ -726,32 +726,12 @@ class AIGateway:
                     cleaned = clean_json_string(raw_res.content).strip()
                     if cleaned.startswith("#") or "##" in cleaned:
                         return cleaned
+                    else:
+                        logger.warning("ai.update_coach_memory.invalid_markdown", preview=cleaned[:100])
             except Exception as e:
                 logger.warning("ai.update_coach_memory.failed_candidate", error=str(e))
 
-        # Fallback deterministic markdown update
-        topic = debate_summary.get("topic", "Debate")
-        side = debate_summary.get("user_side", "agree").capitalize()
-        outcome = debate_summary.get("outcome", "undetermined").replace("_", " ").title()
-        stars = debate_summary.get("stars", 1)
-        tech_score = debate_summary.get("score_technique", 8)
-        deliv_score = debate_summary.get("score_delivery", 8)
-        strong = debate_summary.get("strongest_moment", "Maintained clear position throughout.")
-        improve = debate_summary.get("improvement_opportunity", "State core thesis earlier in the turn.")
-
-        new_entry = f"""### [{current_date}] {topic}
-- Stance: {side} | Outcome: {outcome} | Stars: {stars}/3
-- Technique ({tech_score}/10): Refutation and argument structure maintained.
-- Delivery ({deliv_score}/10): Conversational flow under pressure.
-- Standout Moment: {strong}
-- Primary Focus For Next Time: {improve}
-"""
-        if "## Recent Debates" in previous_markdown:
-            parts = previous_markdown.split("## Recent Debates", 1)
-            updated = parts[0] + "## Recent Debates\n" + new_entry + "\n" + parts[1].strip()
-        else:
-            updated = f"{previous_markdown}\n\n## Recent Debates\n{new_entry}"
-        return updated.strip()
+        raise RuntimeError("Failed to update coach memory: all AI candidates failed or returned invalid markdown")
 
 
 ai_gateway = AIGateway()

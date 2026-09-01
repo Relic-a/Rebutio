@@ -47,9 +47,9 @@ async def lifespan(app: FastAPI):
         if not (settings.INSFORGE_JWT_SECRET or settings.INSFORGE_JWT_PUBLIC_KEY):
             raise RuntimeError("CRITICAL CONFIGURATION ERROR: Production requires InsForge JWT verification configuration (INSFORGE_JWT_SECRET or INSFORGE_JWT_PUBLIC_KEY)!")
 
-        # 4. Storage credentials check
-        if not (settings.INSFORGE_API_KEY or settings.INSFORGE_SERVICE_ROLE_KEY or settings.INSFORGE_ANON_KEY):
-            raise RuntimeError("CRITICAL CONFIGURATION ERROR: Production requires InsForge storage credentials (INSFORGE_API_KEY, INSFORGE_SERVICE_ROLE_KEY, or INSFORGE_ANON_KEY)!")
+        # 4. Storage credentials check: must use private INSFORGE_API_KEY
+        if not settings.INSFORGE_API_KEY:
+            raise RuntimeError("CRITICAL CONFIGURATION ERROR: Production requires private INSFORGE_API_KEY for server-side storage operations!")
 
         # 5. Encryption & session secret checks
         if not settings.REBUTIO_DATA_ENCRYPTION_KEY or settings.REBUTIO_DATA_ENCRYPTION_KEY == DEFAULT_DEV_KEY:

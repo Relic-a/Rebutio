@@ -1,5 +1,6 @@
 import pytest
 import uuid
+from unittest.mock import patch
 from httpx import ASGITransport, AsyncClient
 
 from backend.app.api.dependencies import create_test_auth_token, sign_user_id
@@ -88,14 +89,13 @@ async def test_production_startup_security_guardrails(monkeypatch):
             pass
     monkeypatch.setattr(settings, "INSFORGE_JWT_SECRET", "custom-prod-jwt-secret-key-123456789")
 
-    # 4. Refuse startup if InsForge storage credentials are missing
+    # 4. Refuse startup if private INSFORGE_API_KEY is missing (anon key is NOT accepted as privileged server key)
     monkeypatch.setattr(settings, "INSFORGE_API_KEY", "")
-    monkeypatch.setattr(settings, "INSFORGE_SERVICE_ROLE_KEY", "")
-    monkeypatch.setattr(settings, "INSFORGE_ANON_KEY", "")
-    with pytest.raises(RuntimeError, match="requires InsForge storage credentials"):
+    monkeypatch.setattr(settings, "INSFORGE_ANON_KEY", "anon-key-only")
+    with pytest.raises(RuntimeError, match="requires private INSFORGE_API_KEY"):
         async with lifespan(app):
             pass
-    monkeypatch.setattr(settings, "INSFORGE_API_KEY", "custom-prod-api-key-123456789")
+    monkeypatch.setattr(settings, "INSFORGE_API_KEY", "ik_custom_prod_api_key_123456789")
 
     # 5. Refuse startup if default encryption key is used in production
     monkeypatch.setattr(settings, "REBUTIO_DATA_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
@@ -625,3 +625,94 @@ async def test_retry_after_coach_memory_already_contains_session():
         result_md = await CoachEngine.update_coach_memory_after_debate(db, user_id, debate_summary)
         assert result_md == initial_md
         assert result_md.count(f"<!-- session:{session_id} -->") == 1
+
+
+@pytest.mark.asyncio
+async def test_coach_memory_ai_failure_does_not_append_marker_and_keeps_session_recoverable():
+    """
+    Verifies that if Coach memory AI update fails:
+    1. The session marker is NOT appended to Coach memory.
+    2. The un-updated memory is NOT saved with a false success marker.
+    3. The session remains in review_pending (recoverable).
+    """
+    from backend.app.domain.orchestration import DebateOrchestrator
+    from backend.app.services.ai.gateway import ai_gateway
+    user_id = f"user-mem-fail-{uuid.uuid4().hex[:8]}"
+    token = create_test_auth_token(user_id)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        start_resp = await client.post("/api/debates/start", json={"side": "agree", "onboarding": True}, headers=headers)
+        session_id = start_resp.json()["session"]["id"]
+
+        await client.post(
+            f"/api/sessions/{session_id}/turns",
+            data={"transcript": "Argument against social media echo chambers.", "turn_index": 1},
+            headers=headers,
+        )
+
+        # Mock AI gateway update_coach_memory to simulate upstream AI failure
+        with patch.object(ai_gateway, "update_coach_memory", side_effect=RuntimeError("Upstream AI model rate limit")):
+            # finalize_debate_review must raise or fail closed
+            with pytest.raises(RuntimeError, match="Coach memory AI update failed"):
+                await DebateOrchestrator.finalize_debate_review(session_id, user_id)
+
+        # Verify Coach memory in DB does NOT have the session marker
+        async with async_session_factory() as db:
+            coach_repo = CoachRepository(db)
+            sess_repo = DebateSessionRepository(db)
+
+            mem_md, _ = await coach_repo.get_memory_markdown(user_id)
+            assert f"<!-- session:{session_id} -->" not in mem_md
+
+            # Session must remain review_pending (not marked finished prematurely)
+            sess = await sess_repo.get_session(session_id)
+            assert sess.status == "review_pending"
+
+        # Now simulate a retry where AI succeeds: memory is incorporated, marker appended, session finished
+        rev_resp = await client.get(f"/api/sessions/{session_id}/review", headers=headers)
+        assert rev_resp.status_code == 200
+
+        async with async_session_factory() as db:
+            coach_repo = CoachRepository(db)
+            sess_repo = DebateSessionRepository(db)
+
+            mem_md, _ = await coach_repo.get_memory_markdown(user_id)
+            assert f"<!-- session:{session_id} -->" in mem_md
+            assert mem_md.count(f"<!-- session:{session_id} -->") == 1
+
+            sess = await sess_repo.get_session(session_id)
+            assert sess.status == "finished"
+
+
+@pytest.mark.asyncio
+async def test_migration_files_integrity_and_isolation():
+    """
+    Verifies that:
+    1. Base migration 20260831235601_create-rebutio-schema.sql is treated as immutable and does not
+       contain the new completed_session_ids_json column in its CREATE TABLE.
+    2. The dedicated migration 20260901000001_add_completed_session_ids_to_learning_progress.sql exists
+       and provides the ALTER TABLE statement.
+    """
+    import glob
+    import os
+
+    migrations_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../migrations"))
+    base_migration = os.path.join(migrations_dir, "20260831235601_create-rebutio-schema.sql")
+    new_migration = os.path.join(migrations_dir, "20260901000001_add_completed_session_ids_to_learning_progress.sql")
+
+    assert os.path.exists(base_migration), "Base migration file missing"
+    assert os.path.exists(new_migration), "New migration file missing"
+
+    with open(base_migration, "r", encoding="utf-8") as f:
+        base_content = f.read()
+
+    with open(new_migration, "r", encoding="utf-8") as f:
+        new_content = f.read()
+
+    # Base migration CREATE TABLE must NOT contain completed_session_ids_json
+    assert "completed_session_ids_json" not in base_content
+
+    # New migration MUST contain ALTER TABLE public.learning_progress
+    assert "ALTER TABLE public.learning_progress" in new_content
+    assert "completed_session_ids_json" in new_content

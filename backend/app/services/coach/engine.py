@@ -86,10 +86,11 @@ class CoachEngine:
                 current_date=today,
             )
         except Exception as e:
-            logger.warning("coach.memory_update_ai_failed", error=str(e))
-            updated_md = prev_md
+            logger.warning("coach.memory_update_ai_failed", error=str(e), session_id=session_id, user_id=user_id)
+            # Fail closed: DO NOT add marker, DO NOT save un-updated memory
+            raise RuntimeError(f"Coach memory AI update failed: {e}") from e
 
-        # Append session marker so subsequent retries are strictly idempotent
+        # Append session marker ONLY after successful Coach memory AI update
         if session_marker and session_marker not in updated_md:
             updated_md = f"{updated_md.rstrip()}\n\n{session_marker}\n"
 
@@ -116,9 +117,10 @@ class CoachEngine:
                     current_date=today,
                 )
             except Exception as e:
-                logger.warning("coach.memory_update_retry_ai_failed", error=str(e))
-                retry_updated_md = latest_md
+                logger.warning("coach.memory_update_retry_ai_failed", error=str(e), session_id=session_id, user_id=user_id)
+                raise RuntimeError(f"Coach memory AI update failed during concurrency retry: {e}") from e
 
+            # Only append marker after that retry AI update succeeds
             if session_marker and session_marker not in retry_updated_md:
                 retry_updated_md = f"{retry_updated_md.rstrip()}\n\n{session_marker}\n"
 
@@ -128,7 +130,7 @@ class CoachEngine:
                 return retry_updated_md
             else:
                 logger.warning("coach.memory_update_retry_conflict", user_id=user_id, revision=latest_rev)
-                return latest_md
+                raise RuntimeError(f"Coach memory update concurrency conflict on retry for user {user_id}")
 
         return updated_md
 

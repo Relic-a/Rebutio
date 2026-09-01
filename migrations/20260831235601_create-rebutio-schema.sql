@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS public.learning_progress (
   losses INTEGER NOT NULL DEFAULT 0,
   draws INTEGER NOT NULL DEFAULT 0,
   stars_by_node_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  completed_session_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   placement_completed BOOLEAN NOT NULL DEFAULT FALSE,
   placement_skill_id VARCHAR(64)
 );

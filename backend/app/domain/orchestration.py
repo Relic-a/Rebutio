@@ -765,30 +765,27 @@ class DebateOrchestrator:
                 # Ensure Topic is consumed
                 await topic_repo.mark_consumed(user_id, session.topic_id)
 
-                # Ensure Coach Memory Markdown is updated
-                try:
-                    from backend.app.services.coach.engine import CoachEngine
-                    debate_summary = {
-                        "session_id": session_id,
-                        "topic": session.topic_text,
-                        "user_side": session.user_side,
-                        "outcome": outcome,
-                        "stars": final_stars,
-                        "score_technique": score_tech,
-                        "score_grammar": score_gram,
-                        "score_vocabulary": score_vocab,
-                        "score_delivery": score_deliv,
-                        "strongest_moment": strongest_mom,
-                        "improvement_opportunity": improve_opp,
-                        "rubric_technique": rubric_tech,
-                        "rubric_grammar": rubric_gram,
-                        "rubric_vocabulary": rubric_vocab,
-                        "rubric_delivery": rubric_deliv,
-                        "language_feedback": lang_feedback,
-                    }
-                    await CoachEngine.update_coach_memory_after_debate(db, user_id, debate_summary)
-                except Exception as mem_err:
-                    logger.warning("coach.memory_update_after_debate.failed", error=str(mem_err))
+                # Ensure Coach Memory Markdown is updated (must succeed to finalize session)
+                from backend.app.services.coach.engine import CoachEngine
+                debate_summary = {
+                    "session_id": session_id,
+                    "topic": session.topic_text,
+                    "user_side": session.user_side,
+                    "outcome": outcome,
+                    "stars": final_stars,
+                    "score_technique": score_tech,
+                    "score_grammar": score_gram,
+                    "score_vocabulary": score_vocab,
+                    "score_delivery": score_deliv,
+                    "strongest_moment": strongest_mom,
+                    "improvement_opportunity": improve_opp,
+                    "rubric_technique": rubric_tech,
+                    "rubric_grammar": rubric_gram,
+                    "rubric_vocabulary": rubric_vocab,
+                    "rubric_delivery": rubric_deliv,
+                    "language_feedback": lang_feedback,
+                }
+                await CoachEngine.update_coach_memory_after_debate(db, user_id, debate_summary)
 
                 # Ensure Coach Thread is initialized
                 try:

@@ -86,16 +86,17 @@ class InsForgeMediaStorageService(MediaStorageService):
     def __init__(self, bucket_name: Optional[str] = None):
         self.bucket_name = bucket_name or settings.STORAGE_BUCKET_NAME
         self.insforge_url = settings.INSFORGE_URL.rstrip("/")
-        self.api_key = settings.INSFORGE_API_KEY or settings.INSFORGE_ANON_KEY or ""
+        self.api_key = settings.INSFORGE_API_KEY or ""
         # Local fallback cache for seamless local testing / offline dev
         self._local_fallback_cache: Dict[str, bytes] = {}
 
-    def _get_auth_headers(self, mime_type: Optional[str] = None) -> Dict[str, str]:
+    def _get_auth_headers(self) -> Dict[str, str]:
         headers = {}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        if mime_type:
-            headers["Content-Type"] = mime_type
+        api_key = settings.INSFORGE_API_KEY or self.api_key
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+            headers["apikey"] = api_key
+            headers["x-api-key"] = api_key
         return headers
 
     def _get_ext_from_mime(self, mime_type: str) -> str:
@@ -125,19 +126,16 @@ class InsForgeMediaStorageService(MediaStorageService):
 
     async def _upload_to_insforge(self, object_path: str, data: bytes, mime_type: str) -> bool:
         url = f"{self.insforge_url}/api/storage/buckets/{self.bucket_name}/objects/{object_path}"
-        headers = self._get_auth_headers(mime_type)
+        headers = self._get_auth_headers()
+        filename = os.path.basename(object_path) or "object.bin"
+        files = {"file": (filename, data, mime_type)}
         upload_error = None
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                res = await client.post(url, content=data, headers=headers)
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.put(url, files=files, headers=headers)
                 if res.status_code in (200, 201, 204):
                     logger.info("insforge.storage.uploaded", bucket=self.bucket_name, path=object_path, size=len(data))
                     return True
-                # If POST not allowed or object exists, try PUT
-                if res.status_code in (405, 409):
-                    res_put = await client.put(url, content=data, headers=headers)
-                    if res_put.status_code in (200, 201, 204):
-                        return True
                 upload_error = f"HTTP {res.status_code}: {res.text[:200]}"
                 logger.warning("insforge.storage.upload_response", status=res.status_code, path=object_path)
         except Exception as e:
@@ -160,7 +158,7 @@ class InsForgeMediaStorageService(MediaStorageService):
         url = f"{self.insforge_url}/api/storage/buckets/{self.bucket_name}/objects/{object_path}"
         headers = self._get_auth_headers()
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
                 res = await client.get(url, headers=headers)
                 if res.status_code == 200:
                     return res.content
@@ -175,7 +173,7 @@ class InsForgeMediaStorageService(MediaStorageService):
         url = f"{self.insforge_url}/api/storage/buckets/{self.bucket_name}/objects/{object_path}"
         headers = self._get_auth_headers()
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.delete(url, headers=headers)
                 return res.status_code in (200, 204, 404)
         except Exception as e:
