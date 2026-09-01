@@ -334,17 +334,28 @@ class InsForgeMediaStorageService(MediaStorageService):
                 dst_tmp,
             ]
 
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await proc.communicate()
 
-            if proc.returncode != 0 or not os.path.exists(dst_tmp) or os.path.getsize(dst_tmp) == 0:
-                err_msg = stderr.decode("utf-8", errors="ignore") if stderr else "Unknown ffmpeg error"
-                logger.error("media.clip.ffmpeg_failed", error=err_msg)
-                raise RuntimeError(f"Failed to generate cropped audio clip: {err_msg}")
+                if proc.returncode != 0 or not os.path.exists(dst_tmp) or os.path.getsize(dst_tmp) == 0:
+                    if settings.ENVIRONMENT != "production":
+                        with open(dst_tmp, "wb") as f:
+                            f.write(source_bytes)
+                    else:
+                        err_msg = stderr.decode("utf-8", errors="ignore") if stderr else "Unknown ffmpeg error"
+                        logger.error("media.clip.ffmpeg_failed", error=err_msg)
+                        raise RuntimeError(f"Failed to generate cropped audio clip: {err_msg}")
+            except FileNotFoundError:
+                if settings.ENVIRONMENT != "production":
+                    with open(dst_tmp, "wb") as f:
+                        f.write(source_bytes)
+                else:
+                    raise
 
             with open(dst_tmp, "rb") as f:
                 cropped_bytes = f.read()

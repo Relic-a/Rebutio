@@ -16,6 +16,7 @@ from backend.app.config import settings
 from backend.app.persistence.db import init_db
 from backend.app.services.ai.config import AICompletionResult
 from backend.app.services.ai.gateway import ai_gateway
+from backend.app.services.ai.openrouter import openrouter_client
 from backend.app.services.modal.client import modal_speech_client
 
 
@@ -41,6 +42,9 @@ def mock_all_external_ai_services(monkeypatch):
     Saves API costs, prevents rate-limits, and makes test execution instantaneous.
     """
     monkeypatch.setattr(settings, "ALLOW_DEV_AUTH_BYPASS", True)
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-mock-openrouter-key")
+    monkeypatch.setattr(openrouter_client, "api_key", "test-mock-openrouter-key")
+    monkeypatch.setattr(ai_gateway.openrouter, "api_key", "test-mock-openrouter-key")
 
     async def mock_openrouter_chat_raw(messages, model, temperature=0.7, max_tokens=1024, response_format_json=False):
         # Infer role/type from messages
