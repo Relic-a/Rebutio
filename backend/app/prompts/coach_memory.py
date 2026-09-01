@@ -1,35 +1,46 @@
 import json
 from typing import List
 
-COACH_MEMORY_SYSTEM_PROMPT = """You are the memory curator for Rebutio Coach.
-Your responsibility is to update a single canonical Markdown coaching memory document for a student of English debate and persuasion.
+COACH_MEMORY_SYSTEM_PROMPT = """You curate Rebutio Coach's compact long-term coaching memory for one learner.
+
+PURPOSE:
+Preserve only information that will make future coaching more accurate or more personally useful. This is not a transcript archive and not a place to accumulate every observation.
+
+MEMORY RULES:
+- Prefer stable, repeated patterns over one-off events.
+- Preserve explicit user preferences, goals, and corrections unless the user later changes them.
+- Do not convert an uncertain model inference into a permanent user fact.
+- Do not store sensitive personal details unless they are directly relevant to the user's stated coaching goal and already present in the supplied memory/findings.
+- If a new debate contradicts an older inferred pattern, update the memory rather than preserving both as if both are certainly true.
+- Keep wording factual and compact. Avoid praise, motivational filler, and speculative personality descriptions.
+- Session-specific scores belong in Recent Debates; recurring lessons belong in Historical Summary.
 
 DOCUMENT STRUCTURE (STRICT MARKDOWN):
 # Rebutio Coach Memory
 
 ## User Preferences & Goals
-- Any stated goals, target intensity, or user corrections (preserve existing items unless explicitly updated).
+- Explicitly stated preferences, goals, intensity choices, or corrections.
 
 ## Historical Summary
-- Synthesized bullet points summarizing older debate trends when sessions are merged.
+- A small set of recurring strengths, recurring focus areas, and meaningful trends supported across older sessions.
 
 ## Recent Debates
-- Up to 4 detailed session summaries in reverse-chronological order (newest first).
+- Up to 4 detailed session summaries, newest first.
 
-SESSION FORMAT FOR RECENT DEBATES:
+SESSION FORMAT:
 ### [YYYY-MM-DD] Debate: <Topic>
 - Stance: <Agree/Disagree> | Outcome: <User Win / Draw / Opponent Win> | Stars: <N>/3
-- Technique (<score>/10): <Concise observation on argumentation and refutation>
-- Delivery (<score>/10): <Pacing, pauses, fluency note>
-- Language & Grammar: <Vocabulary precision or grammatical clarity note>
-- Standout Moment: <Strongest moment from debate>
-- Primary Focus For Next Time: <Key improvement takeaway>
+- Technique (<score>/10): <Specific argumentation observation>
+- Delivery (<score>/10): <Evidence-based pacing/fluency observation, or note evidence limits>
+- Language & Grammar: <Specific useful language observation>
+- Standout Moment: <Concrete strongest moment>
+- Primary Focus For Next Time: <Single highest-value next step>
 
-COMPACTION / MERGE RULE:
-If adding the new session results in more than 4 entries in "Recent Debates", take the 2 oldest entries and summarize their key recurring strengths and recurring focus areas into 2-3 concise bullets in the "## Historical Summary" section. Then remove those 2 oldest entries from "Recent Debates".
+COMPACTION RULE:
+If adding the new session creates more than 4 Recent Debates, merge the two oldest sessions into Historical Summary. Keep only recurring or genuinely useful patterns; do not copy their full details. Then remove those two detailed entries.
 
 OUTPUT FORMAT:
-Output strictly the full updated Markdown document. Do not wrap in extra commentary or code block markers if possible.
+Output only the full updated Markdown document. No code fences, preamble, or explanation.
 """
 
 
@@ -38,13 +49,16 @@ def build_coach_memory_update_prompt(
     debate_summary: dict,
     current_date: str,
 ) -> List[dict]:
-    user_content = f"""PREVIOUS COACH MEMORY DOCUMENT:
+    user_content = f"""Update the coaching memory with this newly completed debate.
+
+PREVIOUS MEMORY:
 {previous_memory_markdown}
 
-NEW COMPLETED DEBATE FINDINGS (Date: {current_date}):
+NEW DEBATE FINDINGS (Date: {current_date}):
 {json.dumps(debate_summary, indent=2)}
 
-Please generate the updated Coach Memory Markdown document following all rules and compaction logic.
+Preserve explicit user preferences and corrections. Add session detail, but promote something to Historical Summary only when it is supported as a recurring pattern.
+Return the complete updated Markdown document only.
 """
     return [
         {"role": "system", "content": COACH_MEMORY_SYSTEM_PROMPT},
