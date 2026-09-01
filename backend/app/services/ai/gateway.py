@@ -692,5 +692,67 @@ class AIGateway:
             fallback_factory=fallback,
         )
 
+    async def update_coach_memory(
+        self,
+        messages: List[dict],
+        previous_markdown: str,
+        debate_summary: dict,
+        current_date: str,
+    ) -> str:
+        """
+        Updates the canonical Markdown coaching memory document using Luna/configured analysis model.
+        If AI fails or is unconfigured, creates a clean structured fallback appending the latest debate findings.
+        """
+        role = ModelRole.LANGUAGE_ANALYSIS
+        candidates = get_role_candidates(role)
+        for cand in candidates:
+            try:
+                raw_res: Optional[AICompletionResult] = None
+                if cand.provider == ProviderType.ROUTER_COM and self.router_com.is_configured:
+                    raw_res = await self.router_com.chat_completion_raw(
+                        messages=messages,
+                        model=cand.model_id,
+                        temperature=0.2,
+                        max_tokens=cand.max_tokens,
+                    )
+                elif cand.provider == ProviderType.OPENROUTER and self.openrouter.is_configured:
+                    raw_res = await self.openrouter.chat_completion_raw(
+                        messages=messages,
+                        model=cand.model_id,
+                        temperature=0.2,
+                        max_tokens=cand.max_tokens,
+                    )
+                if raw_res and raw_res.content:
+                    cleaned = clean_json_string(raw_res.content).strip()
+                    if cleaned.startswith("#") or "##" in cleaned:
+                        return cleaned
+            except Exception as e:
+                logger.warning("ai.update_coach_memory.failed_candidate", error=str(e))
+
+        # Fallback deterministic markdown update
+        topic = debate_summary.get("topic", "Debate")
+        side = debate_summary.get("user_side", "agree").capitalize()
+        outcome = debate_summary.get("outcome", "undetermined").replace("_", " ").title()
+        stars = debate_summary.get("stars", 1)
+        tech_score = debate_summary.get("score_technique", 8)
+        deliv_score = debate_summary.get("score_delivery", 8)
+        strong = debate_summary.get("strongest_moment", "Maintained clear position throughout.")
+        improve = debate_summary.get("improvement_opportunity", "State core thesis earlier in the turn.")
+
+        new_entry = f"""### [{current_date}] {topic}
+- Stance: {side} | Outcome: {outcome} | Stars: {stars}/3
+- Technique ({tech_score}/10): Refutation and argument structure maintained.
+- Delivery ({deliv_score}/10): Conversational flow under pressure.
+- Standout Moment: {strong}
+- Primary Focus For Next Time: {improve}
+"""
+        if "## Recent Debates" in previous_markdown:
+            parts = previous_markdown.split("## Recent Debates", 1)
+            updated = parts[0] + "## Recent Debates\n" + new_entry + "\n" + parts[1].strip()
+        else:
+            updated = f"{previous_markdown}\n\n## Recent Debates\n{new_entry}"
+        return updated.strip()
+
 
 ai_gateway = AIGateway()
+

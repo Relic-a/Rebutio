@@ -1,3 +1,4 @@
+import uuid
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -26,9 +27,12 @@ async def test_health_and_ready():
 
 @pytest.mark.asyncio
 async def test_bootstrap_and_onboarding_flow():
+    user_id = f"test-fresh-onboarding-{uuid.uuid4().hex[:8]}"
+    token = sign_user_id(user_id)
+    headers = {"Authorization": f"Bearer {token}"}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # 1. Bootstrap
-        resp = await client.get("/api/bootstrap")
+        resp = await client.get("/api/bootstrap", headers=headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["onboarded"] is False
@@ -42,11 +46,11 @@ async def test_bootstrap_and_onboarding_flow():
             "interests": ["tech", "money", "society"],
             "intensity": "balanced",
         }
-        resp_pref = await client.post("/api/onboarding/preferences", json=prefs)
+        resp_pref = await client.post("/api/onboarding/preferences", json=prefs, headers=headers)
         assert resp_pref.status_code == 200
 
         # 3. Start Onboarding Spar
-        resp_spar = await client.post("/api/onboarding/spar/start?side=agree")
+        resp_spar = await client.post("/api/onboarding/spar/start?side=agree", headers=headers)
         assert resp_spar.status_code == 200
         spar_data = resp_spar.json()
         assert "session" in spar_data
@@ -57,6 +61,7 @@ async def test_bootstrap_and_onboarding_flow():
         turn1_resp = await client.post(
             f"/api/sessions/{session_id}/turns",
             data={"transcript": "Social media makes people interact superficially.", "client_response_delay_ms": 1200},
+            headers=headers,
         )
         assert turn1_resp.status_code == 200
         t1_data = turn1_resp.json()
@@ -69,6 +74,7 @@ async def test_bootstrap_and_onboarding_flow():
         turn2_resp = await client.post(
             f"/api/sessions/{session_id}/turns",
             data={"transcript": "Convenience is not the same as genuine companionship.", "client_response_delay_ms": 1800},
+            headers=headers,
         )
         assert turn2_resp.status_code == 200
         t2_data = turn2_resp.json()
@@ -79,13 +85,14 @@ async def test_bootstrap_and_onboarding_flow():
         turn3_resp = await client.post(
             f"/api/sessions/{session_id}/turns",
             data={"transcript": "In conclusion, depth requires presence which screens cannot substitute.", "client_response_delay_ms": 900},
+            headers=headers,
         )
         assert turn3_resp.status_code == 200
         t3_data = turn3_resp.json()
         assert t3_data["finished"] is True
 
         # 7. Get Review
-        review_resp = await client.get(f"/api/sessions/{session_id}/review")
+        review_resp = await client.get(f"/api/sessions/{session_id}/review", headers=headers)
         assert review_resp.status_code == 200
         rev = review_resp.json()
         assert rev["stars"]["completed"] is True
@@ -98,18 +105,19 @@ async def test_bootstrap_and_onboarding_flow():
         feedback_resp = await client.post(
             f"/api/sessions/{session_id}/review-feedback",
             json={"sessionId": session_id, "verdict": "disagree", "reason": "Felt my final analogy was stronger."},
+            headers=headers,
         )
         assert feedback_resp.status_code == 200
 
         # 9. Get Progress
-        prog_resp = await client.get("/api/progress")
+        prog_resp = await client.get("/api/progress", headers=headers)
         assert prog_resp.status_code == 200
         prog_data = prog_resp.json()
         assert prog_data["debatesCompleted"] >= 1
         assert prog_data["xp"] > 0
 
         # 10. Get Debate Choices
-        choices_resp = await client.get("/api/debates/choices")
+        choices_resp = await client.get("/api/debates/choices", headers=headers)
         assert choices_resp.status_code == 200
         assert len(choices_resp.json()) > 0
 
@@ -117,27 +125,28 @@ async def test_bootstrap_and_onboarding_flow():
         settings_resp = await client.patch(
             "/api/settings",
             json={"saveTranscripts": True, "captionsEnabled": True, "intensity": "bring_it_on"},
+            headers=headers,
         )
         assert settings_resp.status_code == 200
         assert settings_resp.json()["saveTranscripts"] is True
         assert settings_resp.json()["intensity"] == "bring_it_on"
 
         # 12. History List & Deletion
-        history_resp = await client.get("/api/settings/history")
+        history_resp = await client.get("/api/settings/history", headers=headers)
         assert history_resp.status_code == 200
         history_items = history_resp.json()
         assert len(history_items) >= 1
         assert history_items[0]["sessionId"] == session_id
 
-        del_hist_resp = await client.delete("/api/settings/history")
+        del_hist_resp = await client.delete("/api/settings/history", headers=headers)
         assert del_hist_resp.status_code == 200
         assert del_hist_resp.json()["status"] == "ok"
 
 
 @pytest.mark.asyncio
 async def test_path_debate_topic_assignment_stays_stable_after_start():
-    user_id = "topic-assignment-regression-user"
-    headers = {"X-User-ID-Signed": sign_user_id(user_id)}
+    user_id = f"topic-assignment-regression-user-{uuid.uuid4().hex[:8]}"
+    headers = {"Authorization": f"Bearer {sign_user_id(user_id)}"}
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -165,6 +174,7 @@ async def test_path_debate_topic_assignment_stays_stable_after_start():
         )
         assert current_again["topicId"] == current["topicId"]
         assert current_again["topicPreview"] == current["topicPreview"]
+
 
 
 @pytest.mark.asyncio

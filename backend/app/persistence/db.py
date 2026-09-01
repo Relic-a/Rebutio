@@ -12,21 +12,38 @@ from backend.app.observability.logging import get_logger
 
 logger = get_logger("rebutio.db")
 
-connect_args = {}
-if settings.DATABASE_URL.startswith("sqlite"):
-    connect_args["check_same_thread"] = False
-    connect_args["timeout"] = 30.0
+
+def normalize_db_url_and_connect_args(raw_url: str):
+    db_url = raw_url.strip()
+    connect_args = {}
+
+    if db_url.startswith("postgresql://"):
+        db_url = "postgresql+asyncpg://" + db_url[len("postgresql://") :]
+
+    if db_url.startswith("postgresql+asyncpg://"):
+        if "sslmode=require" in db_url or "ssl=require" in db_url or "ssl=true" in db_url.lower():
+            db_url = db_url.split("?")[0]
+            connect_args["ssl"] = "require"
+    elif db_url.startswith("sqlite"):
+        connect_args["check_same_thread"] = False
+        connect_args["timeout"] = 30.0
+
+    return db_url, connect_args
+
+
+normalized_url, engine_connect_args = normalize_db_url_and_connect_args(settings.DATABASE_URL)
 
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    normalized_url,
     echo=False,
-    connect_args=connect_args,
+    connect_args=engine_connect_args,
     future=True,
 )
 
+
 @event.listens_for(engine.sync_engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
-    if settings.DATABASE_URL.startswith("sqlite"):
+    if normalized_url.startswith("sqlite"):
         try:
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
@@ -34,6 +51,7 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
             cursor.close()
         except Exception:
             pass
+
 
 # Slow query listener via synchronous engine
 @event.listens_for(engine.sync_engine, "before_cursor_execute")
@@ -48,7 +66,6 @@ def after_cursor_execute(conn, cursor, statement, parameters, context, executema
         duration_ms = (time.perf_counter() - start_time) * 1000
         slow_threshold_ms = getattr(settings, "DB_SLOW_QUERY_MS", 500)
         if duration_ms > slow_threshold_ms:
-            # Extract safe statement prefix without parameters
             stmt_prefix = statement.strip()[:100].replace("\n", " ")
             logger.warning(
                 "db.operation.slow",
@@ -66,8 +83,14 @@ async_session_factory = async_sessionmaker(
 
 
 async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """
+    Initializes database schema.
+    For local development/testing with SQLite, initializes metadata.
+    In production with InsForge PostgreSQL, migrations are applied via migrations/.
+    """
+    if normalized_url.startswith("sqlite") or settings.ENVIRONMENT == "test":
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

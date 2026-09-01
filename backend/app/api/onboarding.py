@@ -11,6 +11,7 @@ from backend.app.models.schemas import (
     DebateSessionSchema,
     DebateSetupSchema,
     OnboardingPreferencesSchema,
+    SkillTargetSchema,
     StartDebateResponseSchema,
 )
 from backend.app.observability.context import bind_context
@@ -89,6 +90,7 @@ async def start_onboarding_spar(
         difficulty="gentle",
         user_side=side,
         total_user_turns=total_turns,
+        is_onboarding=True,
     )
 
     bind_context(session_id=session_id, user_id=user.id)
@@ -106,7 +108,7 @@ async def start_onboarding_spar(
     session_schema = DebateSessionSchema(
         id=session_record.id,
         topic=session_record.topic_text,
-        skillTarget={"id": skill.id, "name": skill.name, "hint": skill.hint},
+        skillTarget=SkillTargetSchema(id=skill.id, name=skill.name, hint=skill.hint),
         difficulty="gentle",
         userSide=side,
         totalUserTurns=total_turns,
@@ -114,11 +116,12 @@ async def start_onboarding_spar(
         status="active",
         turns=[],
         skillReminder=skill.reminder,
+        isOnboarding=True,
     )
 
     setup_schema = DebateSetupSchema(
         topic=session_record.topic_text,
-        skillTarget={"id": skill.id, "name": skill.name, "hint": skill.hint},
+        skillTarget=SkillTargetSchema(id=skill.id, name=skill.name, hint=skill.hint),
         skillReminder=skill.reminder,
         difficulty="gentle",
         totalUserTurns=total_turns,

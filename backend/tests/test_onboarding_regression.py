@@ -247,15 +247,18 @@ async def test_multi_turn_spar_history_propagation_e2e():
             )
             assert t2_resp.status_code == 200
 
-            # Turn 3
+            # Turn 3 (Final turn of 3-turn debate)
             t3_resp = await client.post(
                 f"/api/sessions/{session_id}/turns",
                 data={"transcript": "What kind of average non-graduates are you talking about?", "turn_index": 3},
             )
             assert t3_resp.status_code == 200
+            t3_data = t3_resp.json()
+            assert t3_data["finished"] is True
+            assert t3_data["opponentTurn"] is None
 
-        # Verify spy captures
-        assert len(captured_prompt_messages) == 3
+        # Verify spy captures: Opponent generates for turn 1 and turn 2, then turn 3 concludes debate
+        assert len(captured_prompt_messages) == 2
 
         # Turn 1 messages
         t1_msgs = captured_prompt_messages[0]["messages"]
@@ -269,10 +272,3 @@ async def test_multi_turn_spar_history_propagation_e2e():
         assert "[Rebutio Turn 1 | Defending: DISAGREE]" in t2_msgs[2]["content"]
         assert "Proof and credentials can be gotten via portfolio faster." in t2_msgs[3]["content"]
 
-        # Turn 3 messages: must have system, u1, opp1, u2, opp2, u3 (with question)
-        t3_msgs = captured_prompt_messages[2]["messages"]
-        assert len(t3_msgs) == 6  # system + u1 + opp1 + u2 + opp2 + u3
-        assert "College wastes time and money." in t3_msgs[1]["content"]
-        assert "Proof and credentials can be gotten via portfolio faster." in t3_msgs[3]["content"]
-        assert "What kind of average non-graduates are you talking about?" in t3_msgs[5]["content"]
-        assert "[Debate Directive for Rebutio Turn 3]" in t3_msgs[5]["content"]

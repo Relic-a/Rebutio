@@ -268,23 +268,17 @@ async def correct_coaching_memory(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Allows the user to correct, update, or dismiss a coaching memory pattern or feedback finding.
+    Allows the user to correct, update, or add a coaching preference note to their canonical memory document.
     """
     coach_repo = CoachRepository(db)
-    item = await coach_repo.apply_user_memory_correction(
+    updated_md = await coach_repo.apply_user_memory_correction(
         user_id=user.id,
-        pattern_id=req.patternId,
-        pattern_type=req.patternType,
-        label=req.label,
         correction_text=req.correctionText,
-        action=req.action,
+        action=req.action or "update",
+        label=req.label,
     )
     return {
         "success": True,
-        "item": {
-            "id": item.id if item else None,
-            "label": item.label if item else None,
-            "status": item.status if item else None,
-            "userCorrection": item.user_correction if item else req.correctionText,
-        }
+        "memoryMarkdown": updated_md,
     }
+

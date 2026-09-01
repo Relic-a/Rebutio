@@ -181,15 +181,15 @@ class DebateOrchestrator:
             )
             logger.info("debate.turn.committed", turn_number=turn_num, speaker="user", turn_id=user_turn_record.id)
 
-            # Check natural close or safety limit
+            # Check natural close or configured turn limit cap
             user_text_lower = user_transcript.lower()
             is_closing_statement = any(
                 phrase in user_text_lower
                 for phrase in ["in conclusion", "to conclude", "finally,", "i rest my case", "closing statement", "that is my case", "concluding argument", "that concludes my argument"]
             )
 
-            # Natural close if user delivers a closing statement or reached safety cap
-            is_final_turn = (turn_num >= 20) or is_closing_statement
+            # A debate finishes automatically when configured total_user_turns is reached or closing statement delivered
+            is_final_turn = (turn_num >= total_turns) or is_closing_statement
 
             if not is_final_turn:
                 # -------------------------------------------------------------------
@@ -681,7 +681,7 @@ class DebateOrchestrator:
 
                 xp_earned = 100 + (final_stars * 20)
 
-                # Record completion & star progression
+                # Record completion & star progression (respecting onboarding placement vs regular debate)
                 await prog_repo.record_debate_completion(
                     user_id=user_id,
                     skill_id=session.skill_id,
@@ -689,6 +689,7 @@ class DebateOrchestrator:
                     xp_earned=xp_earned,
                     outcome=outcome,
                     streak_extended=True,
+                    is_onboarding=session.is_onboarding,
                 )
                 logger.info(
                     "session.progress.updated",
@@ -696,6 +697,7 @@ class DebateOrchestrator:
                     stars_earned=final_stars,
                     xp_earned=xp_earned,
                     outcome=outcome,
+                    is_onboarding=session.is_onboarding,
                 )
 
                 # Update compact persistent speech profile
@@ -739,6 +741,25 @@ class DebateOrchestrator:
                 # A topic remains assigned while a debate is only previewed or
                 # abandoned. Rotate it only after a completed review is saved.
                 await topic_repo.mark_consumed(user_id, session.topic_id)
+
+                # Update canonical Coach Memory Markdown
+                try:
+                    from backend.app.services.coach.engine import CoachEngine
+                    debate_summary = {
+                        "topic": session.topic_text,
+                        "user_side": session.user_side,
+                        "outcome": outcome,
+                        "stars": final_stars,
+                        "score_technique": score_tech,
+                        "score_grammar": score_gram,
+                        "score_vocabulary": score_vocab,
+                        "score_delivery": score_deliv,
+                        "strongest_moment": strongest_mom,
+                        "improvement_opportunity": improve_opp,
+                    }
+                    await CoachEngine.update_coach_memory_after_debate(db, user_id, debate_summary)
+                except Exception as mem_err:
+                    logger.warning("coach.memory_update_after_debate.failed", error=str(mem_err))
 
                 # Pre-initialize Coach Thread before privacy cleanup so opening analysis has full context
                 try:

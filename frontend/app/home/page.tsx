@@ -12,6 +12,7 @@ import { TabBar } from "@/components/shared/TabBar";
 import { appService, skillName } from "@/lib/api";
 import { getEffectivePath, mockDebateTopics } from "@/lib/mock/fixtures";
 import { useStore } from "@/lib/state/store";
+import type { DebateSession } from "@/lib/types";
 
 export default function HomePage() {
   const router = useRouter();
@@ -20,13 +21,19 @@ export default function HomePage() {
   const streakDays = useStore((s) => s.streakDays);
   const starsByNodeId = useStore((s) => s.starsByNodeId);
   const [dailyTopic, setDailyTopic] = useState<(typeof mockDebateTopics)[number] | null>(null);
+  const [activeSession, setActiveSession] = useState<DebateSession | null>(null);
 
   useEffect(() => {
-    if (!onboarded) {
-      appService.getAppBootstrap().then((b) => {
-        if (!b.onboarded) router.replace("/onboarding");
-      }).catch(() => router.replace("/onboarding"));
-    }
+    appService.getAppBootstrap().then((b) => {
+      if (!b.onboarded) {
+        router.replace("/onboarding");
+      } else {
+        if (b.activeSession) {
+          setActiveSession(b.activeSession);
+        }
+      }
+    }).catch(() => router.replace("/onboarding"));
+
     appService.getDebateChoices().then((t) => {
       const day = new Date().getDate();
       setDailyTopic(t[day % t.length]);
@@ -46,6 +53,30 @@ export default function HomePage() {
         <span className="font-display text-lg font-bold">Rebutio</span>
         <span className="rounded-full bg-rally-mist px-3.5 py-1.5 text-rally-deep">{(2460 + xp).toLocaleString()} XP</span>
       </div>
+
+      {/* active unfinished debate banner if exists */}
+      {activeSession && (
+        <motion.section initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mt-6">
+          <div className="rounded-3xl bg-amber-soft border border-amber-300 p-5 shadow-[0_8px_30px_rgba(245,158,11,0.15)]">
+            <div className="flex items-center justify-between">
+              <span className="rounded-full bg-amber-200 px-3 py-1 text-xs font-bold uppercase tracking-wider text-amber-900">In Progress</span>
+              <span className="text-xs font-semibold text-amber-800">
+                Turn {activeSession.currentTurn} of {activeSession.totalUserTurns}
+              </span>
+            </div>
+            <h2 className="mt-3 font-display text-xl font-extrabold leading-snug text-amber-950">{activeSession.topic}</h2>
+            <p className="mt-2 text-xs text-amber-900">
+              Skill: <span className="font-semibold">{activeSession.skillTarget.name}</span> · Side: <span className="capitalize font-semibold">{activeSession.userSide}</span>
+            </p>
+            <Button
+              onClick={() => router.push(`/debate?sessionId=${activeSession.id}`)}
+              className="mt-4 w-full bg-amber-700 hover:bg-amber-800 text-white shadow-md"
+            >
+              Resume Debate
+            </Button>
+          </div>
+        </motion.section>
+      )}
 
       {/* today's spar — the largest element leads into speaking */}
       <motion.section initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mt-8">

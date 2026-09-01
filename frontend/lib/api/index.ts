@@ -4,6 +4,7 @@
 // backend, provider, or transport.
 // ============================================================
 
+import { createClient } from "@insforge/sdk";
 import type {
   CoachHomeData,
   CoachMessage,
@@ -28,6 +29,23 @@ import {
 } from "@/lib/mock/fixtures";
 import { logger } from "@/lib/logger";
 
+export const insforge = createClient({
+  baseUrl: process.env.NEXT_PUBLIC_INSFORGE_URL || "https://yb269bge.us-east.insforge.app",
+  anonKey: process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY || "anon_5042180029b5d24c41a999b3b07eabd76b6f740aa6749b5358bd95e4d6fe42b5",
+});
+
+export async function getAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    const { data } = await insforge.auth.getCurrentUser();
+    if (data?.user?.id) {
+      return { "X-InsForge-User": data.user.id };
+    }
+  } catch {
+    // Non-blocking
+  }
+  return {};
+}
+
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export type BootstrapInfo = {
@@ -36,6 +54,7 @@ export type BootstrapInfo = {
   preferences?: OnboardingPreferences;
   saveTranscripts?: boolean;
   captionsEnabled?: boolean;
+  activeSession?: DebateSession | null;
 };
 
 export type AppService = {
@@ -43,6 +62,7 @@ export type AppService = {
   saveOnboardingPreferences(prefs: OnboardingPreferences): Promise<void>;
   getLearningPath(): Promise<LearningPath>;
   getDebateChoices(): Promise<DebateTopicFixture[]>;
+  getSession(sessionId: string): Promise<DebateSession>;
   /** Returns full setup for a debate; the UI renders whatever it receives. */
   startDebate(opts: {
     topicId?: string;
@@ -111,12 +131,14 @@ export function createHttpService(baseUrl: string = ""): AppService {
 
   async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const url = `${apiBase}${path}`;
+    const authHeaders = await getAuthHeaders();
     try {
       const res = await fetch(url, {
         ...options,
         credentials: "include",
         headers: {
           Accept: "application/json",
+          ...authHeaders,
           ...options.headers,
         },
       });
@@ -168,6 +190,10 @@ export function createHttpService(baseUrl: string = ""): AppService {
       return choices.length > 0 ? choices : mockDebateTopics;
     },
 
+    async getSession(sessionId: string) {
+      return request<DebateSession>(`/api/sessions/${sessionId}`);
+    },
+
     async startDebate(opts) {
       const res = await request<{ session: DebateSession; setup: DebateSetup }>("/api/debates/start", {
         method: "POST",
@@ -183,6 +209,7 @@ export function createHttpService(baseUrl: string = ""): AppService {
     },
 
     async submitUserTurn(session, turn) {
+      const authHeaders = await getAuthHeaders();
       const formData = new FormData();
       if (turn?.audio) {
         formData.append("audio", turn.audio, "user_turn.webm");
@@ -199,6 +226,9 @@ export function createHttpService(baseUrl: string = ""): AppService {
         method: "POST",
         body: formData,
         credentials: "include",
+        headers: {
+          ...authHeaders,
+        },
       });
 
       const reqId = res.headers.get("x-request-id");
@@ -305,6 +335,7 @@ export function createHttpService(baseUrl: string = ""): AppService {
     },
 
     async sendCoachAudioMessage(threadId: string, audio: Blob) {
+      const authHeaders = await getAuthHeaders();
       const formData = new FormData();
       formData.append("audio", audio, "coach_audio.webm");
 
@@ -312,6 +343,9 @@ export function createHttpService(baseUrl: string = ""): AppService {
         method: "POST",
         body: formData,
         credentials: "include",
+        headers: {
+          ...authHeaders,
+        },
       });
 
       if (!res.ok) {
@@ -359,6 +393,24 @@ export function createMockService(): AppService {
     async getDebateChoices() {
       await delay(250);
       return mockDebateTopics;
+    },
+    async getSession(sessionId: string) {
+      await delay(250);
+      if (currentSession && currentSession.id === sessionId) {
+        return currentSession;
+      }
+      return {
+        id: sessionId,
+        topic: "Social media has made friendships worse.",
+        skillTarget: { id: "take_a_side", name: "Take a Side", hint: "Pick a side and hold it." },
+        difficulty: "gentle",
+        userSide: "agree",
+        totalUserTurns: 3,
+        currentTurn: 1,
+        status: "active",
+        turns: [],
+        skillReminder: "Take a clear stance and defend it with reasons.",
+      };
     },
     async startDebate({ topicId, side, onboarding, interests }) {
       await delay(onboarding ? 600 : 500);

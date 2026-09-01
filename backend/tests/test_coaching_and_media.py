@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
-from backend.app.models.db import CoachMessage, CoachThread, CoachingMemoryItem, MediaAsset, User
+from backend.app.models.db import CoachMemory, CoachMessage, CoachThread, MediaAsset, User
 from backend.app.models.schemas import (
     CoachOpeningAnalysisResult,
     CoachTurnResponse,

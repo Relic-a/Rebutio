@@ -11,6 +11,7 @@ from backend.app.models.schemas import (
     DebateSessionSchema,
     DebateSetupSchema,
     DebateTopicChoiceSchema,
+    SkillTargetSchema,
     StartDebateRequestSchema,
     StartDebateResponseSchema,
 )
@@ -107,6 +108,7 @@ async def start_debate(
         difficulty=difficulty,
         user_side=req.side,
         total_user_turns=turns,
+        is_onboarding=req.onboarding,
     )
 
     bind_context(session_id=session_id, user_id=user.id)
@@ -124,7 +126,7 @@ async def start_debate(
     session_schema = DebateSessionSchema(
         id=session_db.id,
         topic=session_db.topic_text,
-        skillTarget={"id": skill.id, "name": skill.name, "hint": skill.hint},
+        skillTarget=SkillTargetSchema(id=skill.id, name=skill.name, hint=skill.hint),
         difficulty=session_db.difficulty,
         userSide=session_db.user_side,
         totalUserTurns=session_db.total_user_turns,
@@ -132,11 +134,12 @@ async def start_debate(
         status="active",
         turns=[],
         skillReminder=session_db.skill_reminder,
+        isOnboarding=req.onboarding,
     )
 
     setup_schema = DebateSetupSchema(
         topic=session_db.topic_text,
-        skillTarget={"id": skill.id, "name": skill.name, "hint": skill.hint},
+        skillTarget=SkillTargetSchema(id=skill.id, name=skill.name, hint=skill.hint),
         skillReminder=session_db.skill_reminder,
         difficulty=session_db.difficulty,
         totalUserTurns=session_db.total_user_turns,

@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import json
 import time
 import uuid
@@ -8,9 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.models.db import (
+    CoachMemory,
     CoachMessage,
     CoachThread,
-    CoachingMemoryItem,
     DebateReview,
     DebateSession,
     DerivedAudioClip,
@@ -43,6 +44,7 @@ from backend.app.prompts.coach import (
     build_coach_conversation_prompt,
     build_coach_opening_prompt,
 )
+from backend.app.prompts.coach_memory import build_coach_memory_update_prompt
 from backend.app.services.ai.config import ModelRole
 from backend.app.services.ai.gateway import ai_gateway
 from backend.app.services.media.storage import media_storage
@@ -53,6 +55,36 @@ logger = get_logger("rebutio.coach")
 
 
 class CoachEngine:
+    @staticmethod
+    async def update_coach_memory_after_debate(
+        db: AsyncSession,
+        user_id: str,
+        debate_summary: dict,
+    ) -> str:
+        coach_repo = CoachRepository(db)
+        prev_md, rev = await coach_repo.get_memory_markdown(user_id)
+        today = datetime.date.today().isoformat()
+
+        prompt_msgs = build_coach_memory_update_prompt(
+            previous_memory_markdown=prev_md,
+            debate_summary=debate_summary,
+            current_date=today,
+        )
+
+        try:
+            updated_md = await ai_gateway.update_coach_memory(
+                messages=prompt_msgs,
+                previous_markdown=prev_md,
+                debate_summary=debate_summary,
+                current_date=today,
+            )
+        except Exception as e:
+            logger.warning("coach.memory_update_ai_failed", error=str(e))
+            updated_md = prev_md
+
+        await coach_repo.save_memory_markdown(user_id, updated_md, expected_revision=rev)
+        return updated_md
+
     @staticmethod
     async def get_or_create_debate_coach_thread(
         db: AsyncSession,
@@ -75,7 +107,7 @@ class CoachEngine:
             session = await sess_repo.get_session(session_id)
 
         if not session:
-            # Create a graceful sample session thread for first-time direct coaching navigation
+            # Create a sample session thread for first-time direct coaching navigation
             thread = await coach_repo.create_general_thread(user_id, "Debate Coaching")
             await coach_repo.add_message(
                 user_id=user_id,
@@ -114,7 +146,7 @@ class CoachEngine:
         if not existing_messages:
             logger.info("coach.opening_analysis.generating", session_id=session.id, thread_id=thread.id)
             review = await sess_repo.get_review(session.id)
-            memories = await coach_repo.get_longitudinal_memory(user_id)
+            memory_md, _ = await coach_repo.get_memory_markdown(user_id)
 
             transcript = []
             for t in session.turns:
@@ -134,17 +166,6 @@ class CoachEngine:
                 "improvement_opportunity": review.improvement_opportunity if review else "State your main claim earlier in the turn.",
             }
 
-            memory_dicts = [
-                {
-                    "label": m.label,
-                    "type": m.pattern_type,
-                    "status": m.status,
-                    "trend": m.trend,
-                    "sessions_observed": m.sessions_observed,
-                }
-                for m in memories[:5]
-            ]
-
             prompt_messages = build_coach_opening_prompt(
                 topic=session.topic_text,
                 user_side=session.user_side,
@@ -153,7 +174,7 @@ class CoachEngine:
                 difficulty=session.difficulty,
                 transcript=transcript,
                 review=review_dict,
-                memory_items=memory_dicts,
+                coach_memory_markdown=memory_md,
             )
 
             try:
@@ -223,7 +244,6 @@ class CoachEngine:
             user_assets = list(res_assets.scalars().all())
 
             if user_assets:
-                # Find asset matching analytical evidence turn or default to primary user turn asset
                 target_turn = opening_res.evidence_turn_number or 1
                 target_asset = next((a for a in user_assets if a.turn_number == target_turn), None) or user_assets[0]
                 try:
@@ -282,7 +302,7 @@ class CoachEngine:
         if not thread or thread.user_id != user_id:
             raise ValueError("Thread not found or unauthorized")
 
-        # Save user message if requested (avoid duplication when called from audio handler)
+        # Save user message if requested
         if create_user_message:
             msg_type = "audio" if media_asset_id else "text"
             await coach_repo.add_message(
@@ -313,19 +333,7 @@ class CoachEngine:
                 "improvement_opportunity": review.improvement_opportunity if review else "Lead with your main point earlier.",
             }
 
-        memories = await coach_repo.get_longitudinal_memory(user_id)
-        memory_dicts = [
-            {
-                "label": m.label,
-                "type": m.pattern_type,
-                "status": m.status,
-                "trend": m.trend,
-                "confidence": m.confidence,
-                "sessions_observed": m.sessions_observed,
-                "user_correction": m.user_correction,
-            }
-            for m in memories[:6]
-        ]
+        memory_md, _ = await coach_repo.get_memory_markdown(user_id)
 
         history_msgs = []
         thread_messages = await coach_repo.get_thread_messages(thread.id)
@@ -343,8 +351,8 @@ class CoachEngine:
             thread_title=thread.title,
             thread_type=thread.thread_type,
             debate_context=debate_context,
-            longitudinal_memory=memory_dicts,
             message_history=history_msgs[-12:],
+            coach_memory_markdown=memory_md,
         )
 
         def default_fallback():
@@ -364,13 +372,10 @@ class CoachEngine:
             fallback_factory=default_fallback,
         )
 
-        # -------------------------------------------------------------------
         # Model -> Tool -> Result -> Model Loop for phoneme and speech metrics
-        # -------------------------------------------------------------------
         if coach_resp.requested_tool == "get_phoneme_data":
             target_asset_id = (coach_resp.tool_args or {}).get("media_asset_id") or media_asset_id
             if not target_asset_id:
-                # Find most recent asset for this user/session
                 stmt_asset_lookup = (
                     select(MediaAsset)
                     .where(MediaAsset.user_id == user_id)
@@ -398,7 +403,6 @@ class CoachEngine:
                         "duration_ms": asset_obj.duration_ms,
                     }
 
-                    # Feed tool result back into prompt for the follow-up completion
                     tool_call_msg = {
                         "role": "assistant",
                         "content": json.dumps({"requested_tool": "get_phoneme_data", "tool_args": {"media_asset_id": target_asset_id}}),
@@ -423,7 +427,6 @@ class CoachEngine:
         evidence_clip = None
         evidence_card_data = None
 
-        # Handle evidence clip creation if card requested or model provided evidence_card
         if coach_resp.evidence_card:
             card_spec = coach_resp.evidence_card
             source_asset_id = card_spec.get("media_asset_id") or media_asset_id
@@ -463,21 +466,6 @@ class CoachEngine:
                 except Exception as e:
                     logger.warning("coach.clip_creation.failed", error=str(e))
 
-        # Apply conservative memory update if suggested
-        if coach_resp.memory_update:
-            mem = coach_resp.memory_update
-            if mem.get("label") and mem.get("pattern_type"):
-                await coach_repo.update_or_create_memory_item(
-                    user_id=user_id,
-                    pattern_type=mem.get("pattern_type", "delivery_pattern"),
-                    label=mem.get("label"),
-                    status=mem.get("status", "active_focus"),
-                    confidence=float(mem.get("confidence", 0.8)),
-                    trend=mem.get("trend", "steady"),
-                    supporting_evidence=[{"text": text, "timestamp": utcnow().isoformat()}],
-                )
-
-        # Save coach response message
         structured_data = {}
         if evidence_card_data:
             structured_data["evidence_card"] = evidence_card_data
@@ -512,7 +500,6 @@ class CoachEngine:
         if not thread or thread.user_id != user_id:
             raise ValueError("Thread not found or unauthorized")
 
-        # Save raw audio asset
         ext = "webm" if "webm" in mime_type else "mp3"
         session_id = thread.session_id
 
@@ -558,7 +545,6 @@ class CoachEngine:
             duration_ms=phonemes_res.get("audio_duration_ms", 0),
         )
 
-        # Create exactly one user audio message
         user_msg = await coach_repo.add_message(
             user_id=user_id,
             thread_id=thread_id,
@@ -571,7 +557,6 @@ class CoachEngine:
 
         user_msg_schema = CoachEngine._message_to_schema(user_msg)
 
-        # Generate coach reply WITHOUT creating a duplicate user message
         coach_msg_schema = await CoachEngine.process_user_text_message(
             db=db,
             user_id=user_id,
@@ -682,7 +667,6 @@ class CoachEngine:
             QuickReplySchema(label="Give me a short practice exercise", prompt="Give me a 1-minute spoken practice exercise to work on my active focus."),
         ]
 
-        # Skill mastery list
         stars_map = progress.stars_by_node_json or {}
         mastery_items = []
         for k, v in stars_map.items():

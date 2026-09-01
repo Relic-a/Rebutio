@@ -1,14 +1,14 @@
 import datetime
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.models.db import (
+    CoachMemory,
     CoachMessage,
     CoachThread,
-    CoachingMemoryItem,
     DebateReview,
     DebateSession,
     DebateTurn,
@@ -27,6 +27,17 @@ from backend.app.services.privacy.encryption import encryptor
 
 logger = get_logger("rebutio.persistence")
 
+DEFAULT_STARTER_MEMORY = """# Rebutio Coach Memory
+
+## User Preferences & Goals
+- Focus: Structure arguments clearly, respond directly to counterpoints, maintain steady pacing under pressure.
+
+## Historical Summary
+- No historical debate summaries yet.
+
+## Recent Debates
+"""
+
 
 class UserRepository:
     def __init__(self, db: AsyncSession):
@@ -37,10 +48,21 @@ class UserRepository:
             stmt = select(User).where(User.id == user_id).options(
                 selectinload(User.progress),
                 selectinload(User.speech_profile),
+                selectinload(User.coach_memory),
             )
             res = await self.db.execute(stmt)
             user = res.scalar_one_or_none()
             if user:
+                # Ensure CoachMemory exists
+                if not user.coach_memory:
+                    coach_mem = CoachMemory(
+                        user_id=user.id,
+                        memory_markdown_encrypted=encryptor.encrypt_str(DEFAULT_STARTER_MEMORY),
+                        revision=1,
+                    )
+                    self.db.add(coach_mem)
+                    await self.db.commit()
+                    await self.db.refresh(user)
                 return user
 
         new_user_id = user_id or str(uuid.uuid4())
@@ -64,6 +86,8 @@ class UserRepository:
             losses=0,
             draws=0,
             stars_by_node_json={},
+            placement_completed=False,
+            placement_skill_id=None,
         )
         self.db.add(progress)
 
@@ -72,6 +96,14 @@ class UserRepository:
             profile_encrypted=None,
         )
         self.db.add(speech_prof)
+
+        coach_mem = CoachMemory(
+            user_id=new_user_id,
+            memory_markdown_encrypted=encryptor.encrypt_str(DEFAULT_STARTER_MEMORY),
+            revision=1,
+        )
+        self.db.add(coach_mem)
+
         await self.db.commit()
         await self.db.refresh(user)
         return user
@@ -138,6 +170,8 @@ class ProgressRepository:
                 losses=0,
                 draws=0,
                 stars_by_node_json={},
+                placement_completed=False,
+                placement_skill_id=None,
             )
             self.db.add(progress)
             await self.db.commit()
@@ -152,11 +186,9 @@ class ProgressRepository:
         xp_earned: int,
         outcome: str,
         streak_extended: bool,
+        is_onboarding: bool = False,
     ) -> LearningProgress:
         prog = await self.get_progress(user_id)
-        stars_map = dict(prog.stars_by_node_json or {})
-        prev_stars = stars_map.get(skill_id, 0)
-        stars_map[skill_id] = max(prev_stars, stars_earned)
 
         new_wins = prog.wins + (1 if outcome == "user_win" else 0)
         new_losses = prog.losses + (1 if outcome == "opponent_win" else 0)
@@ -169,8 +201,16 @@ class ProgressRepository:
         prog.wins = new_wins
         prog.losses = new_losses
         prog.draws = new_draws
-        prog.stars_by_node_json = stars_map
         prog.last_activity_date = datetime.date.today().isoformat()
+
+        if is_onboarding:
+            prog.placement_completed = True
+            prog.placement_skill_id = skill_id
+        else:
+            stars_map = dict(prog.stars_by_node_json or {})
+            prev_stars = stars_map.get(skill_id, 0)
+            stars_map[skill_id] = max(prev_stars, stars_earned)
+            prog.stars_by_node_json = stars_map
 
         await self.db.commit()
         await self.db.refresh(prog)
@@ -271,6 +311,15 @@ class DebateSessionRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def mark_active_sessions_abandoned(self, user_id: str):
+        stmt = (
+            update(DebateSession)
+            .where(DebateSession.user_id == user_id, DebateSession.status == "active")
+            .values(status="abandoned", updated_at=utcnow())
+        )
+        await self.db.execute(stmt)
+        await self.db.commit()
+
     async def create_session(
         self,
         session_id: str,
@@ -284,7 +333,11 @@ class DebateSessionRepository:
         difficulty: str,
         user_side: str,
         total_user_turns: int,
+        is_onboarding: bool = False,
     ) -> DebateSession:
+        # Mark any previous active debates as abandoned - at most 1 active debate per user
+        await self.mark_active_sessions_abandoned(user_id)
+
         sess = DebateSession(
             id=session_id,
             user_id=user_id,
@@ -299,6 +352,7 @@ class DebateSessionRepository:
             total_user_turns=total_user_turns,
             current_turn=1,
             status="active",
+            is_onboarding=is_onboarding,
         )
         self.db.add(sess)
         await self.db.commit()
@@ -574,13 +628,13 @@ class DebateSessionRepository:
     async def cleanup_abandoned_evidence(self, hours: int = 24):
         cutoff = utcnow() - datetime.timedelta(hours=hours)
         stmt = delete(TemporaryTurnEvidence).where(TemporaryTurnEvidence.created_at < cutoff)
-        res = await self.db.execute(stmt)
+        await self.db.execute(stmt)
         await self.db.commit()
         logger.info("privacy.history_retention_applied", retention_hours=hours)
 
 
 # ---------------------------------------------------------------------------
-# Coach Repository
+# Coach Repository & Coach Memory
 # ---------------------------------------------------------------------------
 
 class CoachRepository:
@@ -725,146 +779,70 @@ class CoachRepository:
         await self.db.execute(stmt)
         await self.db.commit()
 
-    async def get_longitudinal_memory(
-        self,
-        user_id: str,
-        focus_area: Optional[str] = None,
-    ) -> List[CoachingMemoryItem]:
-        stmt = (
-            select(CoachingMemoryItem)
-            .where(CoachingMemoryItem.user_id == user_id)
-            .order_by(CoachingMemoryItem.updated_at.desc())
-        )
-        if focus_area:
-            stmt = stmt.where(CoachingMemoryItem.pattern_type == focus_area)
-        res = await self.db.execute(stmt)
-        return list(res.scalars().all())
+    # -----------------------------------------------------------------------
+    # Canonical Markdown Memory Methods
+    # -----------------------------------------------------------------------
 
-    async def update_or_create_memory_item(
-        self,
-        user_id: str,
-        pattern_type: str,
-        label: str,
-        status: str = "active_focus",
-        confidence: float = 0.8,
-        trend: str = "steady",
-        supporting_evidence: Optional[List[dict]] = None,
-        counterevidence: Optional[List[dict]] = None,
-        user_correction: Optional[str] = None,
-    ) -> CoachingMemoryItem:
-        stmt = select(CoachingMemoryItem).where(
-            CoachingMemoryItem.user_id == user_id,
-            CoachingMemoryItem.pattern_type == pattern_type,
-            CoachingMemoryItem.label == label,
-        )
+    async def get_memory_markdown(self, user_id: str) -> Tuple[str, int]:
+        stmt = select(CoachMemory).where(CoachMemory.user_id == user_id)
         res = await self.db.execute(stmt)
-        item = res.scalar_one_or_none()
+        mem = res.scalar_one_or_none()
+        if not mem or not mem.memory_markdown_encrypted:
+            return DEFAULT_STARTER_MEMORY, 0
+        decrypted = encryptor.decrypt_str(mem.memory_markdown_encrypted)
+        return (decrypted or DEFAULT_STARTER_MEMORY), mem.revision
 
-        if item:
-            item.status = status
-            item.confidence = max(item.confidence, confidence)
-            item.sessions_observed += 1
-            item.trend = trend
-            item.last_discussed_at = utcnow()
-            item.updated_at = utcnow()
-            if supporting_evidence:
-                ev_list = list(item.supporting_evidence_json or [])
-                ev_list.extend(supporting_evidence)
-                item.supporting_evidence_json = ev_list[-10:]
-            if counterevidence:
-                cev_list = list(item.counterevidence_json or [])
-                cev_list.extend(counterevidence)
-                item.counterevidence_json = cev_list[-10:]
-            if user_correction:
-                item.user_correction = user_correction
+    async def save_memory_markdown(self, user_id: str, markdown: str, expected_revision: int = 0) -> int:
+        encrypted = encryptor.encrypt_str(markdown)
+        stmt = select(CoachMemory).where(CoachMemory.user_id == user_id)
+        res = await self.db.execute(stmt)
+        mem = res.scalar_one_or_none()
+
+        if mem:
+            mem.memory_markdown_encrypted = encrypted
+            mem.revision += 1
+            mem.updated_at = utcnow()
+            new_rev = mem.revision
         else:
-            item = CoachingMemoryItem(
-                id=f"mem-{uuid.uuid4().hex[:10]}",
+            new_rev = 1
+            mem = CoachMemory(
                 user_id=user_id,
-                pattern_type=pattern_type,
-                label=label,
-                status=status,
-                confidence=confidence,
-                sessions_observed=1,
-                trend=trend,
-                supporting_evidence_json=supporting_evidence or [],
-                counterevidence_json=counterevidence or [],
-                last_discussed_at=utcnow(),
-                user_correction=user_correction,
-                created_at=utcnow(),
+                memory_markdown_encrypted=encrypted,
+                revision=new_rev,
                 updated_at=utcnow(),
             )
-            self.db.add(item)
+            self.db.add(mem)
 
         await self.db.commit()
-        await self.db.refresh(item)
-        return item
+        logger.info("coach.memory.saved", user_id=user_id, revision=new_rev)
+        return new_rev
 
     async def apply_user_memory_correction(
         self,
         user_id: str,
-        pattern_id: Optional[str],
-        pattern_type: Optional[str],
-        label: Optional[str],
         correction_text: str,
         action: str = "update",
-    ) -> Optional[CoachingMemoryItem]:
-        item = None
-        if pattern_id:
-            stmt = select(CoachingMemoryItem).where(CoachingMemoryItem.id == pattern_id, CoachingMemoryItem.user_id == user_id)
-            res = await self.db.execute(stmt)
-            item = res.scalar_one_or_none()
+        label: Optional[str] = None,
+    ) -> str:
+        current_md, rev = await self.get_memory_markdown(user_id)
+        today = datetime.date.today().isoformat()
+        prefix = f"- [{today}] Correction ({label or 'General'}): {correction_text}\n"
 
-        if not item and pattern_type and label:
-            stmt = select(CoachingMemoryItem).where(
-                CoachingMemoryItem.user_id == user_id,
-                CoachingMemoryItem.pattern_type == pattern_type,
-                CoachingMemoryItem.label == label,
-            )
-            res = await self.db.execute(stmt)
-            item = res.scalar_one_or_none()
-
-        if item:
-            item.user_correction = correction_text
-            if action in ("dismiss", "reject_feedback"):
-                item.status = "dismissed"
-            item.updated_at = utcnow()
-            await self.db.commit()
-            await self.db.refresh(item)
-            logger.info("coach.memory.correction_applied", item_id=item.id, action=action)
-            return item
+        if "## User Preferences & Goals" in current_md:
+            parts = current_md.split("## User Preferences & Goals", 1)
+            updated_md = parts[0] + "## User Preferences & Goals\n" + prefix + parts[1]
         else:
-            # Create a user preference / correction record
-            new_item = CoachingMemoryItem(
-                id=f"mem-{uuid.uuid4().hex[:10]}",
-                user_id=user_id,
-                pattern_type=pattern_type or "user_preference",
-                label=label or "User Correction",
-                status="dismissed" if action in ("dismiss", "reject_feedback") else "active_focus",
-                confidence=1.0,
-                sessions_observed=1,
-                trend="steady",
-                supporting_evidence_json=[],
-                counterevidence_json=[],
-                user_correction=correction_text,
-                last_discussed_at=utcnow(),
-                created_at=utcnow(),
-                updated_at=utcnow(),
-            )
-            self.db.add(new_item)
-            await self.db.commit()
-            await self.db.refresh(new_item)
-            return new_item
+            updated_md = f"{current_md}\n\n## User Preferences & Goals\n{prefix}"
+
+        await self.save_memory_markdown(user_id, updated_md, expected_revision=rev)
+        logger.info("coach.memory.correction_applied", user_id=user_id, action=action)
+        return updated_md
 
     async def get_active_focus(self, user_id: str) -> Tuple[str, Optional[str]]:
-        stmt = (
-            select(CoachingMemoryItem)
-            .where(CoachingMemoryItem.user_id == user_id, CoachingMemoryItem.status == "active_focus")
-            .order_by(CoachingMemoryItem.confidence.desc(), CoachingMemoryItem.updated_at.desc())
-            .limit(1)
-        )
-        res = await self.db.execute(stmt)
-        item = res.scalar_one_or_none()
-        if item:
-            return item.label, f"Observed in {item.sessions_observed} debates · Trend: {item.trend}"
+        current_md, _ = await self.get_memory_markdown(user_id)
+        lines = [line.strip() for line in current_md.splitlines() if line.strip().startswith("- ")]
+        for line in lines:
+            if "Focus:" in line or "Primary Focus" in line:
+                content = line.replace("- ", "", 1).strip()
+                return "Debate Technique & Flow", content
         return "Early Premise Clarity", "Focus on stating your central claim within the first 10 seconds of speaking."

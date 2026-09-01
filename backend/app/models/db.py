@@ -37,7 +37,7 @@ class User(Base):
     sessions = relationship("DebateSession", back_populates="user", cascade="all, delete-orphan")
     coach_threads = relationship("CoachThread", back_populates="user", cascade="all, delete-orphan")
     media_assets = relationship("MediaAsset", back_populates="user", cascade="all, delete-orphan")
-    coaching_memories = relationship("CoachingMemoryItem", back_populates="user", cascade="all, delete-orphan")
+    coach_memory = relationship("CoachMemory", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
 
 class LearningProgress(Base):
@@ -53,6 +53,8 @@ class LearningProgress(Base):
     losses = Column(Integer, default=0, nullable=False)
     draws = Column(Integer, default=0, nullable=False)
     stars_by_node_json = Column(JSON, default=dict, nullable=False)
+    placement_completed = Column(Boolean, default=False, nullable=False)
+    placement_skill_id = Column(String(64), nullable=True)
 
     user = relationship("User", back_populates="progress")
 
@@ -100,7 +102,8 @@ class DebateSession(Base):
     user_side = Column(String(16), nullable=False)  # "agree" | "disagree"
     total_user_turns = Column(Integer, default=4, nullable=False)
     current_turn = Column(Integer, default=1, nullable=False)
-    status = Column(String(32), default="active", nullable=False)  # "active" | "finished" | "error"
+    status = Column(String(32), default="active", nullable=False)  # "active" | "finished" | "abandoned" | "error"
+    is_onboarding = Column(Boolean, default=False, nullable=False)
     pre_final_analysis_encrypted = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
@@ -126,10 +129,10 @@ class DebateTurn(Base):
     idempotency_key = Column(String(128), nullable=True, index=True)
 
     # Conversational metadata
-    move = Column(String(64), nullable=True)  # challenge_assumption | ask_clarification | counterexample | request_evidence | concede_and_press | answer_user_question | closing_challenge
+    move = Column(String(64), nullable=True)
     requires_response = Column(Boolean, default=True, nullable=False)
     addressed_claim = Column(Text, nullable=True)
-    conversation_state = Column(String(32), default="unresolved", nullable=False)  # unresolved | advanced | ready_to_close
+    conversation_state = Column(String(32), default="unresolved", nullable=False)
     media_asset_id = Column(String(64), nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
@@ -154,7 +157,7 @@ class DebateReview(Base):
 
     session_id = Column(String(64), ForeignKey("debate_sessions.id", ondelete="CASCADE"), primary_key=True)
     user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
-    outcome = Column(String(32), default="undetermined", nullable=False)  # "user_win" | "opponent_win" | "draw" | "undetermined"
+    outcome = Column(String(32), default="undetermined", nullable=False)
     stars = Column(Integer, default=1, nullable=False)
     completed = Column(Boolean, default=True, nullable=False)
     skill_demonstrated = Column(Boolean, default=False, nullable=False)
@@ -166,7 +169,6 @@ class DebateReview(Base):
     streak_extended = Column(Boolean, default=False, nullable=False)
     next_level_unlocked = Column(Boolean, default=False, nullable=False)
 
-    # 4 integer scores out of 10 with clear rubrics & highlights
     score_technique = Column(Integer, default=8, nullable=False)
     score_grammar = Column(Integer, default=8, nullable=False)
     score_vocabulary = Column(Integer, default=8, nullable=False)
@@ -205,13 +207,13 @@ class MediaAsset(Base):
     user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     session_id = Column(String(64), ForeignKey("debate_sessions.id", ondelete="SET NULL"), index=True, nullable=True)
     turn_number = Column(Integer, nullable=True)
-    source_type = Column(String(32), default="debate_turn", nullable=False)  # "debate_turn" | "coach_audio" | "practice_attempt"
+    source_type = Column(String(32), default="debate_turn", nullable=False)
     storage_path = Column(String(512), nullable=False)
     mime_type = Column(String(64), default="audio/webm", nullable=False)
     file_size_bytes = Column(Integer, default=0, nullable=False)
     duration_ms = Column(Integer, default=0, nullable=False)
     transcript_encrypted = Column(Text, nullable=True)
-    phonemes_encrypted = Column(Text, nullable=True)  # JSON array of timestamped phonemes
+    phonemes_encrypted = Column(Text, nullable=True)
     speech_metrics_json = Column(JSON, nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
@@ -250,7 +252,7 @@ class CoachThread(Base):
     id = Column(String(64), primary_key=True, index=True)
     user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     session_id = Column(String(64), ForeignKey("debate_sessions.id", ondelete="SET NULL"), index=True, nullable=True)
-    thread_type = Column(String(32), default="general", nullable=False)  # "debate_review" | "general"
+    thread_type = Column(String(32), default="general", nullable=False)
     title = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
@@ -266,13 +268,13 @@ class CoachMessage(Base):
     id = Column(String(64), primary_key=True, index=True)
     thread_id = Column(String(64), ForeignKey("coach_threads.id", ondelete="CASCADE"), index=True, nullable=False)
     user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
-    sender = Column(String(16), nullable=False)  # "user" | "coach"
-    message_type = Column(String(32), default="text", nullable=False)  # "text" | "audio" | "opening_analysis" | "evidence_card"
+    sender = Column(String(16), nullable=False)
+    message_type = Column(String(32), default="text", nullable=False)
     text_encrypted = Column(Text, nullable=True)
     media_asset_id = Column(String(64), ForeignKey("media_assets.id", ondelete="SET NULL"), nullable=True)
     evidence_clip_id = Column(String(64), ForeignKey("derived_audio_clips.id", ondelete="SET NULL"), nullable=True)
     structured_data_json = Column(JSON, nullable=True)
-    processing_state = Column(String(32), default="ready", nullable=False)  # "recording" | "uploading" | "processing" | "ready" | "failed"
+    processing_state = Column(String(32), default="ready", nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     thread = relationship("CoachThread", back_populates="messages")
@@ -280,22 +282,12 @@ class CoachMessage(Base):
     evidence_clip = relationship("DerivedAudioClip", foreign_keys=[evidence_clip_id])
 
 
-class CoachingMemoryItem(Base):
-    __tablename__ = "coaching_memory_items"
+class CoachMemory(Base):
+    __tablename__ = "coach_memory"
 
-    id = Column(String(64), primary_key=True, index=True)
-    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
-    pattern_type = Column(String(64), nullable=False)  # active_focus | grammar_pattern | vocabulary_pattern | delivery_pattern | pronunciation_pattern | argumentative_strength | confidence | user_preference
-    label = Column(String(255), nullable=False)
-    status = Column(String(32), default="active_focus", nullable=False)  # active_focus | monitoring | resolved | dismissed
-    confidence = Column(Float, default=0.8, nullable=False)
-    sessions_observed = Column(Integer, default=1, nullable=False)
-    trend = Column(String(32), default="steady", nullable=False)  # improving | steady | needs_focus
-    supporting_evidence_json = Column(JSON, default=list, nullable=False)
-    counterevidence_json = Column(JSON, default=list, nullable=False)
-    last_discussed_at = Column(DateTime(timezone=True), nullable=True)
-    user_correction = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    memory_markdown_encrypted = Column(Text, nullable=False)
+    revision = Column(Integer, default=1, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
-    user = relationship("User", back_populates="coaching_memories")
+    user = relationship("User", back_populates="coach_memory")

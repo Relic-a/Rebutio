@@ -44,9 +44,10 @@ export type DebateSession = {
   userSide: DebateSide;
   totalUserTurns: number;
   currentTurn: number;
-  status: "active" | "finished" | "error";
+  status: "active" | "finished" | "abandoned" | "error";
   turns: DebateTurn[];
   skillReminder: string;
+  isOnboarding?: boolean;
 };
 
 export type DebateSetup = {

@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
 
 
 # ---------------------------------------------------------------------------
@@ -28,25 +29,6 @@ class LearningPathSchema(BaseModel):
     levelName: str
     levelNumber: int
     nodes: List[PathNodeSchema]
-
-
-class BootstrapInfoSchema(BaseModel):
-    onboarded: bool
-    path: LearningPathSchema
-    preferences: Optional[OnboardingPreferencesSchema] = None
-    saveTranscripts: bool = False
-    captionsEnabled: bool = True
-
-
-class DebateTopicChoiceSchema(BaseModel):
-    id: str
-    topic: str
-    skill: str
-    difficulty: Literal["gentle", "steady", "sharp"] = "steady"
-    turns: int = 4
-    minutes: int = 6
-    reminder: str = ""
-    opponentLines: Optional[List[str]] = None
 
 
 class DebateTurnPlaybackSchema(BaseModel):
@@ -83,9 +65,30 @@ class DebateSessionSchema(BaseModel):
     userSide: Literal["agree", "disagree"]
     totalUserTurns: int
     currentTurn: int
-    status: Literal["active", "finished", "error"]
+    status: Literal["active", "finished", "abandoned", "error"]
     turns: List[DebateTurnSchema]
     skillReminder: str
+    isOnboarding: bool = False
+
+
+class BootstrapInfoSchema(BaseModel):
+    onboarded: bool
+    path: LearningPathSchema
+    preferences: Optional[OnboardingPreferencesSchema] = None
+    saveTranscripts: bool = False
+    captionsEnabled: bool = True
+    activeSession: Optional[DebateSessionSchema] = None
+
+
+class DebateTopicChoiceSchema(BaseModel):
+    id: str
+    topic: str
+    skill: str
+    difficulty: Literal["gentle", "steady", "sharp"] = "steady"
+    turns: int = 4
+    minutes: int = 6
+    reminder: str = ""
+    opponentLines: Optional[List[str]] = None
 
 
 class DebateSetupSchema(BaseModel):
@@ -342,12 +345,19 @@ class SendTextMessageRequestSchema(BaseModel):
     text: str
 
 
+class CoachMemorySchema(BaseModel):
+    userId: str
+    memoryMarkdown: str
+    revision: int
+    updatedAt: str
+
+
 class MemoryCorrectionRequestSchema(BaseModel):
+    correctionText: str
+    action: Optional[Literal["update", "dismiss", "reject_feedback"]] = "update"
     patternId: Optional[str] = None
     patternType: Optional[str] = None
     label: Optional[str] = None
-    correctionText: str
-    action: Literal["update", "dismiss", "reject_feedback"] = "update"
 
 
 # ---------------------------------------------------------------------------
@@ -465,9 +475,11 @@ class OpponentMoveResponse(BaseModel):
 
 
 class CoachOpeningAnalysisResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     overall_assessment: str
-    most_important_strength: str
-    highest_value_improvement: str
+    most_important_strength: str = Field(default="You held your ground with strong counterpoints.", alias="mostImportantStrength")
+    highest_value_improvement: str = Field(default="Lead with your main claim earlier.", alias="highestValueImprovement")
     concrete_example: Optional[str] = None
     evidence_turn_number: Optional[int] = None
     suggested_quick_replies: List[str] = Field(
@@ -479,6 +491,7 @@ class CoachOpeningAnalysisResult(BaseModel):
             "Let me try that again",
         ]
     )
+
 
 
 class CoachTurnResponse(BaseModel):

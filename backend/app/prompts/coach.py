@@ -47,14 +47,7 @@ Your output must be a valid JSON object matching:
     "Show me another example",
     "How should I phrase it?",
     "Let me try that again"
-  ],
-  "memory_update": null or {
-    "pattern_type": "delivery_pattern",
-    "label": "Delays central claim",
-    "status": "active_focus",
-    "confidence": 0.85,
-    "trend": "improving"
-  }
+  ]
 }
 """
 
@@ -91,6 +84,7 @@ def build_coach_opening_prompt(
     transcript: List[dict],
     review: Optional[dict] = None,
     memory_items: Optional[List[dict]] = None,
+    coach_memory_markdown: Optional[str] = None,
 ) -> List[dict]:
     context = {
         "motion": topic,
@@ -100,7 +94,7 @@ def build_coach_opening_prompt(
         "difficulty": difficulty,
         "transcript": transcript,
         "review_evaluation": review or {},
-        "longitudinal_memory": memory_items or [],
+        "longitudinal_memory_markdown": coach_memory_markdown or "",
     }
 
     user_msg = f"""Generate the proactive opening analysis for this debate:
@@ -119,8 +113,9 @@ def build_coach_conversation_prompt(
     thread_title: str,
     thread_type: str,
     debate_context: Optional[dict],
-    longitudinal_memory: List[dict],
-    message_history: List[dict],
+    longitudinal_memory: Optional[List[dict]] = None,
+    message_history: Optional[List[dict]] = None,
+    coach_memory_markdown: Optional[str] = None,
 ) -> List[dict]:
     system_msg = f"""{COACH_SYSTEM_PROMPT}
 
@@ -129,16 +124,16 @@ THREAD CONTEXT:
 - Thread Type: {thread_type}
 """
     if debate_context:
-        topic = debate_context.get('topic', '')
-        user_s = debate_context.get('user_side', '')
-        opp_s = debate_context.get('opponent_side', '')
-        skill = debate_context.get('skill_name', '')
-        t_score = debate_context.get('score_technique', 8)
-        g_score = debate_context.get('score_grammar', 8)
-        v_score = debate_context.get('score_vocabulary', 8)
-        d_score = debate_context.get('score_delivery', 8)
-        strong = debate_context.get('strongest_moment', '')
-        improve = debate_context.get('improvement_opportunity', '')
+        topic = debate_context.get("topic", "")
+        user_s = debate_context.get("user_side", "")
+        opp_s = debate_context.get("opponent_side", "")
+        skill = debate_context.get("skill_name", "")
+        t_score = debate_context.get("score_technique", 8)
+        g_score = debate_context.get("score_grammar", 8)
+        v_score = debate_context.get("score_vocabulary", 8)
+        d_score = debate_context.get("score_delivery", 8)
+        strong = debate_context.get("strongest_moment", "")
+        improve = debate_context.get("improvement_opportunity", "")
         system_msg += f"""
 DEBATE SESSION SUMMARY:
 - Motion: "{topic}"
@@ -150,7 +145,12 @@ DEBATE SESSION SUMMARY:
 - Primary Improvement: {improve}
 """
 
-    if longitudinal_memory:
+    if coach_memory_markdown:
+        system_msg += f"""
+LONGITUDINAL COACHING MEMORY (STUDENT HISTORY):
+{coach_memory_markdown}
+"""
+    elif longitudinal_memory:
         system_msg += f"""
 ACTIVE LONGITUDINAL MEMORY:
 {json.dumps(longitudinal_memory[:6], indent=2)}
@@ -158,13 +158,14 @@ ACTIVE LONGITUDINAL MEMORY:
 
     messages = [{"role": "system", "content": system_msg}]
 
-    for msg in message_history:
-        sender = msg.get("sender")
-        text = msg.get("text", "")
-        role = "user" if sender == "user" else "assistant"
-        content = text
-        if msg.get("structured_data"):
-            content = f"{text}\n[Context: {json.dumps(msg.get('structured_data'))}]"
-        messages.append({"role": role, "content": content})
+    if message_history:
+        for msg in message_history:
+            sender = msg.get("sender")
+            text = msg.get("text", "")
+            role = "user" if sender == "user" else "assistant"
+            content = text
+            if msg.get("structured_data"):
+                content = f"{text}\n[Context: {json.dumps(msg.get('structured_data'))}]"
+            messages.append({"role": role, "content": content})
 
     return messages

@@ -24,12 +24,38 @@ function DebateLoader() {
   const params = useSearchParams();
   const router = useRouter();
   const topicId = params.get("topic");
+  const sessionId = params.get("sessionId");
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState<{ session: DebateSession; setup: DebateSetup } | null>(null);
   const [briefed, setBriefed] = useState(false);
   const [side, setSide] = useState<"agree" | "disagree" | null>(null);
   const [starting, setStarting] = useState(false);
   const startInFlight = useRef(false);
+
+  useEffect(() => {
+    if (sessionId && !session && !startInFlight.current) {
+      startInFlight.current = true;
+      setStarting(true);
+      appService.getSession(sessionId).then((existingSession) => {
+        const setup: DebateSetup = {
+          topic: existingSession.topic,
+          skillTarget: existingSession.skillTarget,
+          skillReminder: existingSession.skillReminder,
+          difficulty: existingSession.difficulty,
+          totalUserTurns: existingSession.totalUserTurns,
+          secondsPerTurn: 0,
+          opponentLines: [],
+        };
+        setSession({ session: existingSession, setup });
+        setBriefed(true);
+      }).catch(() => {
+        setError("Could not resume debate session. You can start a new debate below.");
+      }).finally(() => {
+        startInFlight.current = false;
+        setStarting(false);
+      });
+    }
+  }, [sessionId, session]);
 
   async function begin(s: "agree" | "disagree") {
     if (startInFlight.current) return;
