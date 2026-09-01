@@ -250,10 +250,9 @@ async def finish_session(
     if not session or session.user_id != user.id:
         raise HTTPException(status_code=404, detail="Debate session not found")
 
-    # Mark session as finished/review_pending in DB immediately so bootstrap / session state
-    # never presents a stale 'active' status while review is being processed.
-    session.status = "finished"
-    await db.commit()
+    if session.status == "active":
+        session.status = "review_pending"
+        await db.commit()
 
     logger.info("session.manual_finish_triggered", session_id=session_id, user_id=user.id)
     await DebateOrchestrator.finalize_debate_review(session_id, user.id)

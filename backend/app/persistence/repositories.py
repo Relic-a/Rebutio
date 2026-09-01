@@ -789,7 +789,7 @@ class CoachRepository:
         decrypted = encryptor.decrypt_str(mem.memory_markdown_encrypted)
         return (decrypted or DEFAULT_STARTER_MEMORY), mem.revision
 
-    async def save_memory_markdown(self, user_id: str, markdown: str, expected_revision: int = 0) -> int:
+    async def save_memory_markdown(self, user_id: str, markdown: str, expected_revision: int = 0) -> Tuple[bool, Optional[int]]:
         encrypted = encryptor.encrypt_str(markdown)
         stmt = select(CoachMemory.revision).where(CoachMemory.user_id == user_id)
         res = await self.db.execute(stmt)
@@ -806,7 +806,7 @@ class CoachRepository:
             self.db.add(mem)
             await self.db.commit()
             logger.info("coach.memory.saved", user_id=user_id, revision=new_rev)
-            return new_rev
+            return True, new_rev
 
         # Optimistic concurrency check:
         # UPDATE coach_memory SET markdown = ..., revision = revision + 1
@@ -822,30 +822,13 @@ class CoachRepository:
         )
         update_res = await self.db.execute(update_stmt)
         if update_res.rowcount == 0:
-            # Revision conflict: reload latest and retry once
-            logger.info("coach.memory.concurrency_conflict_retrying", user_id=user_id, expected_rev=expected_revision)
-            stmt_reload = select(CoachMemory.revision).where(CoachMemory.user_id == user_id)
-            res_reload = await self.db.execute(stmt_reload)
-            latest_rev = res_reload.scalar_one_or_none()
-            if latest_rev is not None:
-                retry_stmt = (
-                    update(CoachMemory)
-                    .where(CoachMemory.user_id == user_id, CoachMemory.revision == latest_rev)
-                    .values(
-                        memory_markdown_encrypted=encrypted,
-                        revision=latest_rev + 1,
-                        updated_at=utcnow(),
-                    )
-                )
-                await self.db.execute(retry_stmt)
-                await self.db.commit()
-                logger.info("coach.memory.saved", user_id=user_id, revision=latest_rev + 1)
-                return latest_rev + 1
+            logger.warning("coach.memory.revision_conflict", user_id=user_id, expected_rev=expected_revision)
+            return False, None
 
         await self.db.commit()
         new_rev = expected_revision + 1
         logger.info("coach.memory.saved", user_id=user_id, revision=new_rev)
-        return new_rev
+        return True, new_rev
 
     async def apply_user_memory_correction(
         self,
@@ -858,13 +841,20 @@ class CoachRepository:
         today = datetime.date.today().isoformat()
         prefix = f"- [{today}] Correction ({label or 'General'}): {correction_text}\n"
 
-        if "## User Preferences & Goals" in current_md:
-            parts = current_md.split("## User Preferences & Goals", 1)
-            updated_md = parts[0] + "## User Preferences & Goals\n" + prefix + parts[1]
-        else:
-            updated_md = f"{current_md}\n\n## User Preferences & Goals\n{prefix}"
+        def _insert_correction(md: str) -> str:
+            if "## User Preferences & Goals" in md:
+                parts = md.split("## User Preferences & Goals", 1)
+                return parts[0] + "## User Preferences & Goals\n" + prefix + parts[1]
+            return f"{md}\n\n## User Preferences & Goals\n{prefix}"
 
-        await self.save_memory_markdown(user_id, updated_md, expected_revision=rev)
+        updated_md = _insert_correction(current_md)
+        saved, _ = await self.save_memory_markdown(user_id, updated_md, expected_revision=rev)
+        if not saved:
+            # Reload latest markdown and retry once
+            latest_md, latest_rev = await self.get_memory_markdown(user_id)
+            updated_md = _insert_correction(latest_md)
+            await self.save_memory_markdown(user_id, updated_md, expected_revision=latest_rev)
+
         logger.info("coach.memory.correction_applied", user_id=user_id, action=action)
         return updated_md
 

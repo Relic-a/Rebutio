@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { appService, noteCurrentSession } from "@/lib/api";
+import { appService, getValidAccessToken, noteCurrentSession } from "@/lib/api";
 import { capture } from "@/lib/media/capture";
 import { logger } from "@/lib/logger";
 import type { DebateReview, DebateSession, DebateSetup, Speaker } from "@/lib/types";
@@ -129,9 +129,17 @@ export function DebateFlow({
     };
   }
 
-  function prepareAudio(url: string, autoplay: boolean) {
+  async function prepareAudio(url: string, autoplay: boolean) {
     audioPlayerRef.current?.pause();
-    const audio = new Audio(url);
+    let playUrl = url;
+    try {
+      const token = await getValidAccessToken();
+      if (token && !url.includes("token=")) {
+        playUrl = `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+      }
+    } catch {}
+
+    const audio = new Audio(playUrl);
     audioPlayerRef.current = audio;
     attachAudioHandlers(audio);
     if (autoplay) {

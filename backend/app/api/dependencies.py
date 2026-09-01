@@ -34,6 +34,11 @@ def extract_bearer_token(request: Request, cookie_token: Optional[str] = None) -
     if insforge_header:
         return insforge_header.strip()
 
+    # Query param token for EventSource (SSE) and audio streaming
+    query_token = request.query_params.get("token") or request.query_params.get("access_token")
+    if query_token:
+        return query_token.strip()
+
     if cookie_token:
         return cookie_token.strip()
 
@@ -50,7 +55,7 @@ def verify_insforge_jwt(token: str) -> Optional[str]:
         secrets_to_try.append((settings.INSFORGE_JWT_SECRET, ["HS256"]))
     if settings.INSFORGE_JWT_PUBLIC_KEY:
         secrets_to_try.append((settings.INSFORGE_JWT_PUBLIC_KEY, ["RS256"]))
-    if settings.REBUTIO_SESSION_SECRET:
+    if settings.REBUTIO_SESSION_SECRET and settings.ENVIRONMENT != "production":
         secrets_to_try.append((settings.REBUTIO_SESSION_SECRET, ["HS256"]))
 
     # Try cryptographic verification with configured keys
@@ -87,29 +92,19 @@ def verify_insforge_jwt(token: str) -> Optional[str]:
 def verify_test_or_legacy_token(token: str, request: Request) -> Optional[str]:
     """
     Test and development authorization verification.
-    Only active when ALLOW_DEV_AUTH_BYPASS=True.
+    Strictly active only when ALLOW_DEV_AUTH_BYPASS=True in non-production.
+    Never active in production.
     """
+    if not (settings.ALLOW_DEV_AUTH_BYPASS and settings.ENVIRONMENT in ("test", "development")):
+        return None
+
     # Allow simple test user IDs when in test/dev mode with explicit bypass
-    if settings.ALLOW_DEV_AUTH_BYPASS and settings.ENVIRONMENT in ("test", "development"):
-        if token.startswith("test-") or token.startswith("user-") or token.startswith("mock-"):
-            return token
+    if token.startswith("test-") or token.startswith("user-") or token.startswith("mock-"):
+        return token
 
-        test_header = request.headers.get("X-Test-User-ID")
-        if test_header:
-            return test_header.strip()
-
-    # Signed cookie verification fallback
-    if "." in token and settings.REBUTIO_SESSION_SECRET:
-        try:
-            parts = token.split(".", 1)
-            if len(parts) == 2:
-                user_id, sig = parts
-                secret = settings.REBUTIO_SESSION_SECRET.encode("utf-8")
-                expected_sig = hmac.new(secret, user_id.encode("utf-8"), hashlib.sha256).hexdigest()
-                if hmac.compare_digest(sig, expected_sig):
-                    return user_id
-        except Exception:
-            pass
+    test_header = request.headers.get("X-Test-User-ID")
+    if test_header:
+        return test_header.strip()
 
     return None
 
@@ -127,7 +122,7 @@ async def get_current_user(
     Never trusts client-provided user IDs.
     Fails closed when no verified token is provided.
     """
-    token = extract_bearer_token(request, cookie_token=insforge_access_token or rebutio_session)
+    token = extract_bearer_token(request, cookie_token=insforge_access_token or (rebutio_session if settings.ALLOW_DEV_AUTH_BYPASS else None))
     user_id = None
 
     if token:

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { TabBar } from "@/components/shared/TabBar";
 import { AuthModal } from "@/components/shared/AuthModal";
-import { insforge } from "@/lib/api";
+import { appService, insforge } from "@/lib/api";
 import { onboardingOptions } from "@/lib/mock/fixtures";
 import { useStore } from "@/lib/state/store";
 
@@ -37,27 +37,20 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (!onboarded) router.replace("/onboarding");
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    fetch(`${apiBase}/api/settings`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
+    appService
+      .getSettings()
       .then((data) => {
         if (data) {
           if (data.saveTranscripts !== undefined) setSaveTranscripts(Boolean(data.saveTranscripts));
           if (data.captionsEnabled !== undefined) setCaptions(Boolean(data.captionsEnabled));
-          if (data.intensity) setIntensity(data.intensity);
+          if (data.intensity) setIntensity(data.intensity as typeof intensity);
         }
       })
       .catch(() => {});
   }, [onboarded, router]);
 
   async function updateSetting(patch: { saveTranscripts?: boolean; captionsEnabled?: boolean; intensity?: string }) {
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    await fetch(`${apiBase}/api/settings`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-      credentials: "include",
-    }).catch(() => {});
+    await appService.updateSettings(patch).catch(() => {});
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   }

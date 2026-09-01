@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { appService } from "@/lib/api";
+import { appService, getValidAccessToken } from "@/lib/api";
 import { capture } from "@/lib/media/capture";
 import { logger } from "@/lib/logger";
 import type { AudioEvidenceCard, CoachMessage, CoachThreadDetail, QuickReply } from "@/lib/types";
@@ -59,7 +59,7 @@ export default function SessionCoachPage() {
   }, [sessionId]);
 
   // Play audio evidence clip
-  const playClip = (clipId: string, url: string) => {
+  const playClip = async (clipId: string, url: string) => {
     if (activeClipPlaying === clipId) {
       if (audioPlayerRef.current) {
         audioPlayerRef.current.pause();
@@ -79,7 +79,15 @@ export default function SessionCoachPage() {
       };
     }
 
-    audioPlayerRef.current.src = url;
+    let playUrl = url;
+    try {
+      const token = await getValidAccessToken();
+      if (token && !url.includes("token=")) {
+        playUrl = `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+      }
+    } catch {}
+
+    audioPlayerRef.current.src = playUrl;
     audioPlayerRef.current.play().catch((e) => {
       logger.warn("coach.audio_play_failed", { clipId, error: String(e) });
       setErrorMsg("Audio playback blocked by browser. Click again to play.");

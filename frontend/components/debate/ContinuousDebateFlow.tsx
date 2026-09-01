@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { appService, noteCurrentSession } from "@/lib/api";
+import { appService, getValidAccessToken, noteCurrentSession } from "@/lib/api";
 import { capture } from "@/lib/media/capture";
 import { logger } from "@/lib/logger";
 import type { DebateReview, DebateSession, DebateSetup, Speaker } from "@/lib/types";
@@ -115,7 +115,7 @@ export function ContinuousDebateFlow({
   };
 
   // Play opponent audio if available
-  const playTurnAudio = (turnId: string, url: string) => {
+  const playTurnAudio = async (turnId: string, url: string) => {
     if (activeAudioPlaying === turnId) {
       if (audioPlayerRef.current) {
         audioPlayerRef.current.pause();
@@ -127,7 +127,16 @@ export function ContinuousDebateFlow({
     if (!audioPlayerRef.current) {
       audioPlayerRef.current = new Audio();
     }
-    audioPlayerRef.current.src = url;
+
+    let playUrl = url;
+    try {
+      const token = await getValidAccessToken();
+      if (token && !url.includes("token=")) {
+        playUrl = `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+      }
+    } catch {}
+
+    audioPlayerRef.current.src = playUrl;
     audioPlayerRef.current.play().catch((e) => logger.warn("audio.play_failed", { error: String(e) }));
     setActiveAudioPlaying(turnId);
 

@@ -82,7 +82,36 @@ class CoachEngine:
             logger.warning("coach.memory_update_ai_failed", error=str(e))
             updated_md = prev_md
 
-        await coach_repo.save_memory_markdown(user_id, updated_md, expected_revision=rev)
+        saved, new_rev = await coach_repo.save_memory_markdown(user_id, updated_md, expected_revision=rev)
+        if not saved:
+            logger.info("coach.memory.concurrency_conflict_retrying", user_id=user_id, expected_rev=rev)
+            # 1. Reload latest Markdown and revision
+            latest_md, latest_rev = await coach_repo.get_memory_markdown(user_id)
+            # 2. Rerun memory-update AI using the latest Markdown plus the new debate findings
+            retry_prompt_msgs = build_coach_memory_update_prompt(
+                previous_memory_markdown=latest_md,
+                debate_summary=debate_summary,
+                current_date=today,
+            )
+            try:
+                retry_updated_md = await ai_gateway.update_coach_memory(
+                    messages=retry_prompt_msgs,
+                    previous_markdown=latest_md,
+                    debate_summary=debate_summary,
+                    current_date=today,
+                )
+            except Exception as e:
+                logger.warning("coach.memory_update_retry_ai_failed", error=str(e))
+                retry_updated_md = latest_md
+
+            # 3. Retry the save once with the latest revision
+            retry_saved, _ = await coach_repo.save_memory_markdown(user_id, retry_updated_md, expected_revision=latest_rev)
+            if retry_saved:
+                return retry_updated_md
+            else:
+                logger.warning("coach.memory_update_retry_conflict", user_id=user_id, revision=latest_rev)
+                return latest_md
+
         return updated_md
 
     @staticmethod

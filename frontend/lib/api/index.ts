@@ -34,9 +34,24 @@ export const insforge = createClient({
   anonKey: process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY || "anon_5042180029b5d24c41a999b3b07eabd76b6f740aa6749b5358bd95e4d6fe42b5",
 });
 
-export async function getAuthHeaders(): Promise<Record<string, string>> {
+export async function getValidAccessToken(): Promise<string | null> {
   try {
     const token = await insforge.getHttpClient().getValidAccessToken();
+    if (token) return token;
+    const clientHeaders = insforge.getHttpClient().getHeaders();
+    const auth = clientHeaders["Authorization"] || clientHeaders["authorization"];
+    if (auth && auth.toLowerCase().startsWith("bearer ")) {
+      return auth.slice(7).trim();
+    }
+  } catch {
+    // Non-blocking
+  }
+  return null;
+}
+
+export async function getAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    const token = await getValidAccessToken();
     if (token) {
       return { Authorization: `Bearer ${token}` };
     }
@@ -93,6 +108,38 @@ export type AppService = {
   getDebateReview(sessionId: string): Promise<DebateReview>;
   submitReviewFeedback(feedback: { sessionId: string; verdict: "disagree"; reason?: string }): Promise<void>;
   getProgress(): Promise<ProgressStats>;
+
+  // User Settings & Privacy Endpoints
+  getSettings(): Promise<{
+    saveTranscripts: boolean;
+    captionsEnabled: boolean;
+    intensity: string;
+    goals: string[];
+    interests: string[];
+    comfort: string;
+  }>;
+  updateSettings(patch: {
+    saveTranscripts?: boolean;
+    captionsEnabled?: boolean;
+    intensity?: string;
+  }): Promise<{
+    status: string;
+    saveTranscripts: boolean;
+    captionsEnabled: boolean;
+    intensity: string;
+  }>;
+  deleteHistory(): Promise<{ status: string; message: string }>;
+  deleteSpeechProfile(): Promise<{ status: string; message: string }>;
+  getHistory(): Promise<Array<{
+    sessionId: string;
+    topic: string;
+    skillName: string;
+    difficulty: string;
+    outcome: string;
+    stars: number;
+    createdAt: string;
+    transcriptsSaved: boolean;
+  }>>;
 
   // Coaching System Endpoints
   getCoachHome(): Promise<CoachHomeData>;
@@ -265,28 +312,38 @@ export function createHttpService(baseUrl: string = ""): AppService {
         return () => {};
       }
 
-      try {
-        const es = new EventSource(`${apiBase}/api/sessions/${sessionId}/events`, {
-          withCredentials: true,
-        });
+      let es: EventSource | null = null;
+      let isClosed = false;
 
-        es.onmessage = (e) => {
-          try {
-            const parsed = JSON.parse(e.data);
-            onEvent(parsed);
-          } catch {}
-        };
+      (async () => {
+        try {
+          const token = await getValidAccessToken();
+          if (isClosed) return;
+          const urlStr = `${apiBase}/api/sessions/${sessionId}/events${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+          es = new EventSource(urlStr, {
+            withCredentials: true,
+          });
 
-        es.onerror = () => {
-          logger.warn("event_stream.closed", { sessionId });
-          es.close();
-        };
+          es.onmessage = (e) => {
+            try {
+              const parsed = JSON.parse(e.data);
+              onEvent(parsed);
+            } catch {}
+          };
 
-        return () => es.close();
-      } catch (err) {
-        logger.error("event_stream.init_failed", { sessionId }, err);
-        return () => {};
-      }
+          es.onerror = () => {
+            logger.warn("event_stream.closed", { sessionId });
+            if (es) es.close();
+          };
+        } catch (err) {
+          logger.error("event_stream.init_failed", { sessionId }, err);
+        }
+      })();
+
+      return () => {
+        isClosed = true;
+        if (es) es.close();
+      };
     },
 
     async finishDebate(session) {
@@ -309,6 +366,55 @@ export function createHttpService(baseUrl: string = ""): AppService {
 
     async getProgress() {
       return request<ProgressStats>("/api/progress");
+    },
+
+    async getSettings() {
+      return request<{
+        saveTranscripts: boolean;
+        captionsEnabled: boolean;
+        intensity: string;
+        goals: string[];
+        interests: string[];
+        comfort: string;
+      }>("/api/settings");
+    },
+
+    async updateSettings(patch) {
+      return request<{
+        status: string;
+        saveTranscripts: boolean;
+        captionsEnabled: boolean;
+        intensity: string;
+      }>("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+    },
+
+    async deleteHistory() {
+      return request<{ status: string; message: string }>("/api/settings/history", {
+        method: "DELETE",
+      });
+    },
+
+    async deleteSpeechProfile() {
+      return request<{ status: string; message: string }>("/api/settings/speech-profile", {
+        method: "DELETE",
+      });
+    },
+
+    async getHistory() {
+      return request<Array<{
+        sessionId: string;
+        topic: string;
+        skillName: string;
+        difficulty: string;
+        outcome: string;
+        stars: number;
+        createdAt: string;
+        transcriptsSaved: boolean;
+      }>>("/api/settings/history");
     },
 
     async getCoachHome() {
@@ -485,6 +591,49 @@ export function createMockService(): AppService {
     async getProgress() {
       await delay(250);
       return mockProgressStats;
+    },
+    async getSettings() {
+      await delay(200);
+      return {
+        saveTranscripts: false,
+        captionsEnabled: true,
+        intensity: "balanced",
+        goals: ["Confidence", "Quick refutations"],
+        interests: ["tech", "philosophy"],
+        comfort: "conversational",
+      };
+    },
+    async updateSettings(patch: any) {
+      await delay(200);
+      return {
+        status: "ok",
+        saveTranscripts: patch.saveTranscripts ?? false,
+        captionsEnabled: patch.captionsEnabled ?? true,
+        intensity: patch.intensity ?? "balanced",
+      };
+    },
+    async deleteHistory() {
+      await delay(200);
+      return { status: "ok", message: "History cleared." };
+    },
+    async deleteSpeechProfile() {
+      await delay(200);
+      return { status: "ok", message: "Speech profile cleared." };
+    },
+    async getHistory() {
+      await delay(200);
+      return [
+        {
+          sessionId: "mock-session-1",
+          topic: "Social media has made friendships worse.",
+          skillName: "Counterpoint",
+          difficulty: "steady",
+          outcome: "user_win",
+          stars: 2,
+          createdAt: new Date().toISOString(),
+          transcriptsSaved: false,
+        },
+      ];
     },
     async getCoachHome() {
       await delay(200);

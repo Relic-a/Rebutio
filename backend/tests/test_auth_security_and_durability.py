@@ -10,6 +10,8 @@ from backend.app.persistence.db import async_session_factory, init_db
 from backend.app.persistence.repositories import (
     CoachRepository,
     DebateSessionRepository,
+    ProgressRepository,
+    TopicInventoryRepository,
 )
 from backend.app.services.media.storage import media_storage
 
@@ -157,11 +159,191 @@ async def test_manual_finish_and_submission_status_enforcement():
 
 
 @pytest.mark.asyncio
-async def test_coach_memory_optimistic_concurrency():
+async def test_authenticated_settings_requests(monkeypatch):
     """
-    Verifies that CoachRepository.save_memory_markdown uses optimistic concurrency
-    based on expected_revision and handles concurrent updates cleanly.
+    Verifies that settings endpoints require valid InsForge authentication
+    and return correct user settings when authenticated.
     """
+    monkeypatch.setattr(settings, "ALLOW_DEV_AUTH_BYPASS", False)
+
+    user_id = f"user-settings-test-{uuid.uuid4().hex[:8]}"
+    token = create_test_auth_token(user_id)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # 1. Unauthenticated request rejected with 401
+        unauth_resp = await client.get("/api/settings")
+        assert unauth_resp.status_code == 401
+
+        unauth_patch = await client.patch("/api/settings", json={"saveTranscripts": True})
+        assert unauth_patch.status_code == 401
+
+        # 2. Authenticated GET settings
+        get_resp = await client.get("/api/settings", headers=headers)
+        assert get_resp.status_code == 200
+        data = get_resp.json()
+        assert "saveTranscripts" in data
+        assert "captionsEnabled" in data
+        assert "intensity" in data
+
+        # 3. Authenticated PATCH settings
+        patch_resp = await client.patch(
+            "/api/settings",
+            json={"saveTranscripts": True, "captionsEnabled": False, "intensity": "bring_it_on"},
+            headers=headers,
+        )
+        assert patch_resp.status_code == 200
+        patch_data = patch_resp.json()
+        assert patch_data["saveTranscripts"] is True
+        assert patch_data["captionsEnabled"] is False
+        assert patch_data["intensity"] == "bring_it_on"
+
+
+@pytest.mark.asyncio
+async def test_non_active_session_rejection():
+    """
+    Verifies that sessions with status != 'active' (e.g. 'review_pending' or 'finished')
+    strictly reject turn submissions with 400 Bad Request.
+    """
+    user_id = f"user-non-active-test-{uuid.uuid4().hex[:8]}"
+    token = create_test_auth_token(user_id)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        start_resp = await client.post("/api/debates/start", json={"side": "agree", "onboarding": True}, headers=headers)
+        assert start_resp.status_code == 200
+        session_id = start_resp.json()["session"]["id"]
+
+        # Set session to review_pending in DB
+        async with async_session_factory() as db:
+            sess_repo = DebateSessionRepository(db)
+            sess = await sess_repo.get_session(session_id)
+            sess.status = "review_pending"
+            await db.commit()
+
+        # Turn submission on review_pending session must fail
+        turn_resp = await client.post(
+            f"/api/sessions/{session_id}/turns",
+            data={"transcript": "Turn during review_pending", "turn_index": 1},
+            headers=headers,
+        )
+        assert turn_resp.status_code == 400
+        assert "not active" in turn_resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_recoverable_review_pending_finalization():
+    """
+    Verifies that if a session is left in review_pending (simulating server restart/interruption),
+    requesting the review resumes and completes all remaining finalization steps:
+    review saved, progress updated, topic consumed, coach memory updated, coach thread initialized,
+    and status persisted as finished.
+    """
+    from backend.app.domain.orchestration import DebateOrchestrator
+    user_id = f"user-recover-test-{uuid.uuid4().hex[:8]}"
+    token = create_test_auth_token(user_id)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        start_resp = await client.post("/api/debates/start", json={"side": "agree", "onboarding": True}, headers=headers)
+        session_id = start_resp.json()["session"]["id"]
+
+        # Submit Turn 1
+        await client.post(
+            f"/api/sessions/{session_id}/turns",
+            data={"transcript": "I believe this topic is crucial.", "turn_index": 1},
+            headers=headers,
+        )
+
+        # Force session state to review_pending (simulating interruption before finalization completed)
+        async with async_session_factory() as db:
+            sess_repo = DebateSessionRepository(db)
+            sess = await sess_repo.get_session(session_id)
+            sess.status = "review_pending"
+            await db.commit()
+
+        # Request review: must resume, finalize, and transition to finished
+        review_resp = await client.get(f"/api/sessions/{session_id}/review", headers=headers)
+        assert review_resp.status_code == 200
+        rev = review_resp.json()
+        assert rev["stars"]["completed"] is True
+        assert rev["xpEarned"] > 0
+
+        # Verify DB persisted state
+        async with async_session_factory() as db:
+            sess_repo = DebateSessionRepository(db)
+            prog_repo = ProgressRepository(db)
+            topic_repo = TopicInventoryRepository(db)
+            coach_repo = CoachRepository(db)
+
+            sess = await sess_repo.get_session(session_id)
+            assert sess.status == "finished"
+
+            prog = await prog_repo.get_progress(user_id)
+            assert prog.xp > 0
+            assert prog.debates_completed >= 1
+
+            # Coach memory updated
+            mem_md, rev_num = await coach_repo.get_memory_markdown(user_id)
+            assert rev_num >= 1
+
+            # Coach thread created
+            thread = await coach_repo.get_or_create_debate_thread(user_id, session_id, "Test Thread")
+            assert thread.session_id == session_id
+
+
+@pytest.mark.asyncio
+async def test_idempotent_post_debate_processing():
+    """
+    Verifies that calling finalization multiple times on the same session
+    does not duplicate XP, progress, or side effects.
+    """
+    from backend.app.domain.orchestration import DebateOrchestrator
+    user_id = f"user-idempotent-test-{uuid.uuid4().hex[:8]}"
+    token = create_test_auth_token(user_id)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        start_resp = await client.post("/api/debates/start", json={"side": "agree", "onboarding": True}, headers=headers)
+        session_id = start_resp.json()["session"]["id"]
+
+        await client.post(
+            f"/api/sessions/{session_id}/turns",
+            data={"transcript": "Strong initial debate point.", "turn_index": 1},
+            headers=headers,
+        )
+
+        # Run finalization first time
+        review1 = await DebateOrchestrator.finalize_debate_review(session_id, user_id)
+        assert review1.sessionId == session_id
+
+        # Capture progress after first finalization
+        async with async_session_factory() as db:
+            prog_repo = ProgressRepository(db)
+            prog1 = await prog_repo.get_progress(user_id)
+            xp1 = prog1.xp
+            debates1 = prog1.debates_completed
+
+        # Run finalization second time on the same session
+        review2 = await DebateOrchestrator.finalize_debate_review(session_id, user_id)
+        assert review2.sessionId == session_id
+        assert review2.xpEarned == review1.xpEarned
+
+        # Verify progress was NOT duplicated
+        async with async_session_factory() as db:
+            prog_repo = ProgressRepository(db)
+            prog2 = await prog_repo.get_progress(user_id)
+            assert prog2.xp == xp1
+            assert prog2.debates_completed == debates1
+
+
+@pytest.mark.asyncio
+async def test_coach_memory_optimistic_concurrency_conflict_handling():
+    """
+    Verifies that CoachRepository.save_memory_markdown prevents stale overwrites
+    and CoachEngine.update_coach_memory_after_debate reconciles on conflict.
+    """
+    from backend.app.services.coach.engine import CoachEngine
     user_id = f"user-concurrency-{uuid.uuid4().hex[:8]}"
 
     async with async_session_factory() as db:
@@ -169,20 +351,76 @@ async def test_coach_memory_optimistic_concurrency():
 
         # Initial save (revision 1)
         initial_md = "# Initial Memory\n- Point 1"
-        rev1 = await repo.save_memory_markdown(user_id, initial_md, expected_revision=0)
+        saved1, rev1 = await repo.save_memory_markdown(user_id, initial_md, expected_revision=0)
+        assert saved1 is True
         assert rev1 == 1
 
         # Second update with matching expected revision (revision 2)
         second_md = "# Updated Memory\n- Point 2"
-        rev2 = await repo.save_memory_markdown(user_id, second_md, expected_revision=1)
+        saved2, rev2 = await repo.save_memory_markdown(user_id, second_md, expected_revision=1)
+        assert saved2 is True
         assert rev2 == 2
 
-        # Stale update with mismatched expected_revision (simulating simultaneous update)
-        # Should detect conflict and retry
+        # Attempt stale update with old expected_revision=1 -> must be rejected (saved=False)
         stale_md = "# Stale Update Overwrite\n- Point Stale"
-        rev3 = await repo.save_memory_markdown(user_id, stale_md, expected_revision=1)
-        assert rev3 == 3
+        saved3, rev3 = await repo.save_memory_markdown(user_id, stale_md, expected_revision=1)
+        assert saved3 is False
+        assert rev3 is None
 
+        # Verify memory in DB remained the newer version (revision 2)
         loaded_md, final_rev = await repo.get_memory_markdown(user_id)
-        assert final_rev == 3
-        assert "Stale Update Overwrite" in loaded_md
+        assert final_rev == 2
+        assert "Updated Memory" in loaded_md
+        assert "Stale Update Overwrite" not in loaded_md
+
+        # Verify CoachEngine reconciles memory properly after conflict
+        debate_summary = {
+            "topic": "Testing AI Debate Topic",
+            "user_side": "agree",
+            "outcome": "user_win",
+            "stars": 3,
+            "score_technique": 9,
+            "score_grammar": 9,
+            "score_vocabulary": 9,
+            "score_delivery": 9,
+        }
+        reconciled_md = await CoachEngine.update_coach_memory_after_debate(db, user_id, debate_summary)
+        assert reconciled_md is not None
+        _, updated_rev = await repo.get_memory_markdown(user_id)
+        assert updated_rev == 3
+
+
+@pytest.mark.asyncio
+async def test_production_storage_failure_behavior(monkeypatch):
+    """
+    Verifies that when ENVIRONMENT == 'production', storage failures raise RuntimeError
+    and do not insert orphan records into the media_assets table.
+    """
+    from backend.app.models.db import MediaAsset
+    from sqlalchemy import select
+
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+
+    # Mock _upload_to_insforge to simulate storage API error in production
+    async def mock_failing_upload(*args, **kwargs):
+        raise RuntimeError("InsForge storage service unavailable: HTTP 503")
+
+    monkeypatch.setattr(media_storage, "_upload_to_insforge", mock_failing_upload)
+
+    user_id = f"user-prod-storage-fail-{uuid.uuid4().hex[:8]}"
+    dummy_audio = b"fake-audio-bytes"
+
+    async with async_session_factory() as db:
+        # In production, save_media_asset must raise and not save DB row
+        with pytest.raises(RuntimeError, match="InsForge storage service unavailable"):
+            await media_storage.save_media_asset(
+                db=db,
+                user_id=user_id,
+                audio_bytes=dummy_audio,
+                mime_type="audio/webm",
+            )
+
+        # Verify no record was created in database
+        stmt = select(MediaAsset).where(MediaAsset.user_id == user_id)
+        res = await db.execute(stmt)
+        assert res.scalar_one_or_none() is None

@@ -126,6 +126,7 @@ class InsForgeMediaStorageService(MediaStorageService):
     async def _upload_to_insforge(self, object_path: str, data: bytes, mime_type: str) -> bool:
         url = f"{self.insforge_url}/api/storage/buckets/{self.bucket_name}/objects/{object_path}"
         headers = self._get_auth_headers(mime_type)
+        upload_error = None
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.post(url, content=data, headers=headers)
@@ -137,16 +138,23 @@ class InsForgeMediaStorageService(MediaStorageService):
                     res_put = await client.put(url, content=data, headers=headers)
                     if res_put.status_code in (200, 201, 204):
                         return True
+                upload_error = f"HTTP {res.status_code}: {res.text[:200]}"
                 logger.warning("insforge.storage.upload_response", status=res.status_code, path=object_path)
         except Exception as e:
-            logger.warning("insforge.storage.upload_network_fallback", path=object_path, error=str(e))
+            upload_error = str(e)
+            logger.warning("insforge.storage.upload_network_error", path=object_path, error=upload_error)
 
-        # Store in fallback cache for test/dev environments
+        # In production, NEVER silently fall back to in-memory cache and never pretend file was uploaded!
+        if settings.ENVIRONMENT == "production":
+            logger.error("insforge.storage.upload_failed_in_production", path=object_path, error=upload_error)
+            raise RuntimeError(f"Failed to upload media to InsForge storage in production: {upload_error}")
+
+        # Local/test mode fallback only
         self._local_fallback_cache[object_path] = data
         return True
 
     async def _download_from_insforge(self, object_path: str) -> Optional[bytes]:
-        if object_path in self._local_fallback_cache:
+        if settings.ENVIRONMENT != "production" and object_path in self._local_fallback_cache:
             return self._local_fallback_cache[object_path]
 
         url = f"{self.insforge_url}/api/storage/buckets/{self.bucket_name}/objects/{object_path}"

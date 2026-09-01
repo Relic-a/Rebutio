@@ -39,7 +39,7 @@ async def get_debate_review(
         raise HTTPException(status_code=404, detail="Debate session not found")
 
     review_db = await sess_repo.get_review(target_session_id)
-    if not review_db or session.status == "review_pending":
+    if not review_db or session.status != "finished":
         # Finalize / retry review generation durably on demand
         return await DebateOrchestrator.finalize_debate_review(target_session_id, user.id)
 
