@@ -29,6 +29,18 @@ logger = get_logger("rebutio.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Production security fail-closed sanity checks
+    DEFAULT_DEV_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    DEFAULT_DEV_SESSION_SECRET = "rebutio-stable-dev-session-secret-key-32b"
+
+    if settings.ENVIRONMENT == "production":
+        if settings.ALLOW_DEV_AUTH_BYPASS:
+            raise RuntimeError("CRITICAL SECURITY VIOLATION: ALLOW_DEV_AUTH_BYPASS cannot be True in production!")
+        if settings.REBUTIO_DATA_ENCRYPTION_KEY == DEFAULT_DEV_KEY:
+            raise RuntimeError("CRITICAL SECURITY VIOLATION: REBUTIO_DATA_ENCRYPTION_KEY must be configured with a secure key in production!")
+        if settings.REBUTIO_SESSION_SECRET == DEFAULT_DEV_SESSION_SECRET:
+            raise RuntimeError("CRITICAL SECURITY VIOLATION: REBUTIO_SESSION_SECRET must be configured with a secure key in production!")
+
     # Log startup configuration safely without secrets
     db_type = "postgresql" if "postgresql" in settings.DATABASE_URL else "sqlite"
     logger.info(

@@ -203,10 +203,7 @@ class ProgressRepository:
         prog.draws = new_draws
         prog.last_activity_date = datetime.date.today().isoformat()
 
-        if is_onboarding:
-            prog.placement_completed = True
-            prog.placement_skill_id = skill_id
-        else:
+        if not is_onboarding:
             stars_map = dict(prog.stars_by_node_json or {})
             prev_stars = stars_map.get(skill_id, 0)
             stars_map[skill_id] = max(prev_stars, stars_earned)
@@ -794,16 +791,11 @@ class CoachRepository:
 
     async def save_memory_markdown(self, user_id: str, markdown: str, expected_revision: int = 0) -> int:
         encrypted = encryptor.encrypt_str(markdown)
-        stmt = select(CoachMemory).where(CoachMemory.user_id == user_id)
+        stmt = select(CoachMemory.revision).where(CoachMemory.user_id == user_id)
         res = await self.db.execute(stmt)
-        mem = res.scalar_one_or_none()
+        current_rev = res.scalar_one_or_none()
 
-        if mem:
-            mem.memory_markdown_encrypted = encrypted
-            mem.revision += 1
-            mem.updated_at = utcnow()
-            new_rev = mem.revision
-        else:
+        if current_rev is None:
             new_rev = 1
             mem = CoachMemory(
                 user_id=user_id,
@@ -812,8 +804,46 @@ class CoachRepository:
                 updated_at=utcnow(),
             )
             self.db.add(mem)
+            await self.db.commit()
+            logger.info("coach.memory.saved", user_id=user_id, revision=new_rev)
+            return new_rev
+
+        # Optimistic concurrency check:
+        # UPDATE coach_memory SET markdown = ..., revision = revision + 1
+        # WHERE user_id = :user_id AND revision = :expected_revision
+        update_stmt = (
+            update(CoachMemory)
+            .where(CoachMemory.user_id == user_id, CoachMemory.revision == expected_revision)
+            .values(
+                memory_markdown_encrypted=encrypted,
+                revision=expected_revision + 1,
+                updated_at=utcnow(),
+            )
+        )
+        update_res = await self.db.execute(update_stmt)
+        if update_res.rowcount == 0:
+            # Revision conflict: reload latest and retry once
+            logger.info("coach.memory.concurrency_conflict_retrying", user_id=user_id, expected_rev=expected_revision)
+            stmt_reload = select(CoachMemory.revision).where(CoachMemory.user_id == user_id)
+            res_reload = await self.db.execute(stmt_reload)
+            latest_rev = res_reload.scalar_one_or_none()
+            if latest_rev is not None:
+                retry_stmt = (
+                    update(CoachMemory)
+                    .where(CoachMemory.user_id == user_id, CoachMemory.revision == latest_rev)
+                    .values(
+                        memory_markdown_encrypted=encrypted,
+                        revision=latest_rev + 1,
+                        updated_at=utcnow(),
+                    )
+                )
+                await self.db.execute(retry_stmt)
+                await self.db.commit()
+                logger.info("coach.memory.saved", user_id=user_id, revision=latest_rev + 1)
+                return latest_rev + 1
 
         await self.db.commit()
+        new_rev = expected_revision + 1
         logger.info("coach.memory.saved", user_id=user_id, revision=new_rev)
         return new_rev
 

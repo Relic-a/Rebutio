@@ -348,7 +348,7 @@ class DebateOrchestrator:
                 await session_repo.update_current_turn(
                     session_id=session_id,
                     next_turn_number=turn_num,
-                    status="finished",
+                    status="review_pending",
                 )
 
                 user_turn_schema = DebateTurnSchema(
@@ -756,6 +756,15 @@ class DebateOrchestrator:
                         "score_delivery": score_deliv,
                         "strongest_moment": strongest_mom,
                         "improvement_opportunity": improve_opp,
+                        "rubric_technique": rubric_tech,
+                        "rubric_grammar": rubric_gram,
+                        "rubric_vocabulary": rubric_vocab,
+                        "rubric_delivery": rubric_deliv,
+                        "language_feedback": lang_feedback,
+                        "grammar_finding": patch_res.grammar_finding.model_dump() if patch_res and patch_res.grammar_finding else None,
+                        "fluency_finding": patch_res.fluency_finding.model_dump() if patch_res and patch_res.fluency_finding else None,
+                        "vocabulary_finding": patch_res.vocabulary_finding.model_dump() if patch_res and patch_res.vocabulary_finding else None,
+                        "pronunciation_findings": [p.model_dump() for p in patch_res.pronunciation_findings if p.reportable] if patch_res else [],
                     }
                     await CoachEngine.update_coach_memory_after_debate(db, user_id, debate_summary)
                 except Exception as mem_err:

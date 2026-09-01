@@ -99,8 +99,11 @@ async def submit_turn(
     if not session or session.user_id != user.id:
         raise HTTPException(status_code=404, detail="Debate session not found")
 
-    if session.status == "finished":
-        raise HTTPException(status_code=400, detail="Debate session is already finished")
+    if session.status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Debate session is not active (current status: '{session.status}')",
+        )
 
     ALLOWED_FORMATS = {"webm", "wav", "mp4", "m4a", "ogg", "mp3", "aac"}
     MAX_AUDIO_BYTES = 25 * 1024 * 1024  # 25MB limit
@@ -247,5 +250,11 @@ async def finish_session(
     if not session or session.user_id != user.id:
         raise HTTPException(status_code=404, detail="Debate session not found")
 
+    # Mark session as finished/review_pending in DB immediately so bootstrap / session state
+    # never presents a stale 'active' status while review is being processed.
+    session.status = "finished"
+    await db.commit()
+
+    logger.info("session.manual_finish_triggered", session_id=session_id, user_id=user.id)
     await DebateOrchestrator.finalize_debate_review(session_id, user.id)
     return {"status": "ok"}

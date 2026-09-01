@@ -207,3 +207,71 @@ CREATE TABLE IF NOT EXISTS public.coach_memory (
   revision INTEGER NOT NULL DEFAULT 1,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ============================================================
+-- InsForge Private Storage Bucket Configuration
+-- ============================================================
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'storage' AND table_name = 'buckets') THEN
+    INSERT INTO storage.buckets (id, name, public)
+    VALUES ('rebutio-media', 'rebutio-media', false)
+    ON CONFLICT (id) DO UPDATE SET public = false;
+  END IF;
+END $$;
+
+-- ============================================================
+-- Row Level Security (RLS) Enablement & Tenant Isolation
+-- ============================================================
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.learning_progress ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.speech_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.topic_inventory ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.debate_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.debate_turns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.temporary_turn_evidence ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.debate_reviews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.review_feedback ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.media_assets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.derived_audio_clips ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.coach_threads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.coach_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.coach_memory ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'users' AND policyname = 'users_isolation') THEN
+    CREATE POLICY users_isolation ON public.users FOR ALL USING (id = auth.uid()::text);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'learning_progress' AND policyname = 'learning_progress_isolation') THEN
+    CREATE POLICY learning_progress_isolation ON public.learning_progress FOR ALL USING (user_id = auth.uid()::text);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'speech_profiles' AND policyname = 'speech_profiles_isolation') THEN
+    CREATE POLICY speech_profiles_isolation ON public.speech_profiles FOR ALL USING (user_id = auth.uid()::text);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'topic_inventory' AND policyname = 'topic_inventory_isolation') THEN
+    CREATE POLICY topic_inventory_isolation ON public.topic_inventory FOR ALL USING (user_id = auth.uid()::text);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'debate_sessions' AND policyname = 'debate_sessions_isolation') THEN
+    CREATE POLICY debate_sessions_isolation ON public.debate_sessions FOR ALL USING (user_id = auth.uid()::text);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'debate_reviews' AND policyname = 'debate_reviews_isolation') THEN
+    CREATE POLICY debate_reviews_isolation ON public.debate_reviews FOR ALL USING (user_id = auth.uid()::text);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'media_assets' AND policyname = 'media_assets_isolation') THEN
+    CREATE POLICY media_assets_isolation ON public.media_assets FOR ALL USING (user_id = auth.uid()::text);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'derived_audio_clips' AND policyname = 'derived_clips_isolation') THEN
+    CREATE POLICY derived_clips_isolation ON public.derived_audio_clips FOR ALL USING (user_id = auth.uid()::text);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'coach_threads' AND policyname = 'coach_threads_isolation') THEN
+    CREATE POLICY coach_threads_isolation ON public.coach_threads FOR ALL USING (user_id = auth.uid()::text);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'coach_messages' AND policyname = 'coach_messages_isolation') THEN
+    CREATE POLICY coach_messages_isolation ON public.coach_messages FOR ALL USING (user_id = auth.uid()::text);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'coach_memory' AND policyname = 'coach_memory_isolation') THEN
+    CREATE POLICY coach_memory_isolation ON public.coach_memory FOR ALL USING (user_id = auth.uid()::text);
+  END IF;
+END $$;
+

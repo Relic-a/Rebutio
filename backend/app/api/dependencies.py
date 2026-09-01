@@ -68,8 +68,8 @@ def verify_insforge_jwt(token: str) -> Optional[str]:
         except Exception:
             continue
 
-    # Unverified decode fallback if JWT has sub and we are in test/dev environment without secret
-    if settings.ENVIRONMENT in ("test", "development"):
+    # Unverified decode fallback ONLY if explicit development bypass is enabled
+    if settings.ALLOW_DEV_AUTH_BYPASS and settings.ENVIRONMENT in ("test", "development"):
         try:
             unverified_payload = jwt.decode(
                 token,
@@ -87,9 +87,10 @@ def verify_insforge_jwt(token: str) -> Optional[str]:
 def verify_test_or_legacy_token(token: str, request: Request) -> Optional[str]:
     """
     Test and development authorization verification.
+    Only active when ALLOW_DEV_AUTH_BYPASS=True.
     """
-    # Allow simple test user IDs when in test/dev mode
-    if settings.ENVIRONMENT in ("test", "development"):
+    # Allow simple test user IDs when in test/dev mode with explicit bypass
+    if settings.ALLOW_DEV_AUTH_BYPASS and settings.ENVIRONMENT in ("test", "development"):
         if token.startswith("test-") or token.startswith("user-") or token.startswith("mock-"):
             return token
 
@@ -97,13 +98,18 @@ def verify_test_or_legacy_token(token: str, request: Request) -> Optional[str]:
         if test_header:
             return test_header.strip()
 
-    # Legacy signed cookie verification fallback for migration grace period
+    # Signed cookie verification fallback
     if "." in token and settings.REBUTIO_SESSION_SECRET:
-        user_id, sig = token.split(".", 1)
-        secret = settings.REBUTIO_SESSION_SECRET.encode("utf-8")
-        expected_sig = hmac.new(secret, user_id.encode("utf-8"), hashlib.sha256).hexdigest()
-        if hmac.compare_digest(sig, expected_sig):
-            return user_id
+        try:
+            parts = token.split(".", 1)
+            if len(parts) == 2:
+                user_id, sig = parts
+                secret = settings.REBUTIO_SESSION_SECRET.encode("utf-8")
+                expected_sig = hmac.new(secret, user_id.encode("utf-8"), hashlib.sha256).hexdigest()
+                if hmac.compare_digest(sig, expected_sig):
+                    return user_id
+        except Exception:
+            pass
 
     return None
 
@@ -119,6 +125,7 @@ async def get_current_user(
     Verifies authenticated user identity server-side using InsForge Bearer token.
     Derives user ID strictly from the verified auth token.
     Never trusts client-provided user IDs.
+    Fails closed when no verified token is provided.
     """
     token = extract_bearer_token(request, cookie_token=insforge_access_token or rebutio_session)
     user_id = None
@@ -128,8 +135,8 @@ async def get_current_user(
         if not user_id:
             user_id = verify_test_or_legacy_token(token, request)
 
-    if not user_id and settings.ENVIRONMENT in ("test", "development"):
-        # For seamless test and local development, default to a stable verified local dev identity
+    if not user_id and settings.ALLOW_DEV_AUTH_BYPASS and settings.ENVIRONMENT in ("test", "development"):
+        # Explicit bypass only: default to a stable verified local dev identity
         user_id = request.headers.get("X-Test-User-ID") or "default-user-id"
 
     if not user_id:

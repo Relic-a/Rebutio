@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     PORT: int = 8000
     FRONTEND_ORIGIN: str = "http://localhost:3000"
     ENVIRONMENT: str = "development"
+    ALLOW_DEV_AUTH_BYPASS: bool = False
 
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./rebutio.db"

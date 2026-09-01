@@ -1,10 +1,10 @@
 "use client";
 
-// Profile / settings. No real accounts in V1.
-
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { TabBar } from "@/components/shared/TabBar";
+import { AuthModal } from "@/components/shared/AuthModal";
+import { insforge } from "@/lib/api";
 import { onboardingOptions } from "@/lib/mock/fixtures";
 import { useStore } from "@/lib/state/store";
 
@@ -17,6 +17,23 @@ export default function ProfilePage() {
   const [captions, setCaptions] = useState(true);
   const [saveTranscripts, setSaveTranscripts] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [authUser, setAuthUser] = useState<any>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  useEffect(() => {
+    // Check InsForge user session
+    insforge.auth.getCurrentUser().then(({ data }) => {
+      if (data?.user) setAuthUser(data.user);
+    }).catch(() => {});
+
+    const unsubscribe = insforge.auth.onAuthStateChange(() => {
+      insforge.auth.getCurrentUser().then(({ data }) => {
+        setAuthUser(data?.user ?? null);
+      });
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (!onboarded) router.replace("/onboarding");
@@ -149,6 +166,42 @@ export default function ProfilePage() {
         <p className="mt-2 px-1 text-xs text-ink-soft">Audio turns send raw voice evidence for analysis.</p>
       </section>
 
+      <section className="mt-8">
+        <h2 className="font-display text-lg font-bold">Account & Cloud Sync</h2>
+        <div className="mt-3 rounded-2xl bg-white p-4 shadow-[0_2px_10px_rgba(34,39,31,0.04)]">
+          {authUser ? (
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="block text-sm font-semibold text-ink">{authUser.email}</span>
+                <span className="block text-xs text-rally">● Synced via InsForge</span>
+              </div>
+              <button
+                onClick={async () => {
+                  await insforge.auth.signOut();
+                  setAuthUser(null);
+                }}
+                className="rounded-full border border-ink/15 px-3.5 py-1.5 text-xs font-semibold text-ink-soft hover:border-ink/40 hover:text-ink transition-colors"
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="block text-sm font-semibold text-ink">Guest Mode</span>
+                <span className="block text-xs text-ink-soft">Sign in to save your debate journey</span>
+              </div>
+              <button
+                onClick={() => setShowAuthModal(true)}
+                className="rounded-full bg-rally px-4 py-2 text-xs font-semibold text-white hover:bg-rally-deep transition-colors"
+              >
+                Sign In / Up
+              </button>
+            </div>
+          )}
+        </div>
+      </section>
+
       <section className="mt-10 border-t border-ink/10 pt-6">
         <button
           onClick={() => {
@@ -166,6 +219,12 @@ export default function ProfilePage() {
           Saved
         </p>
       )}
+
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={(u) => setAuthUser(u)}
+      />
 
       <TabBar />
     </main>

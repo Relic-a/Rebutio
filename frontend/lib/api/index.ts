@@ -36,9 +36,14 @@ export const insforge = createClient({
 
 export async function getAuthHeaders(): Promise<Record<string, string>> {
   try {
-    const { data } = await insforge.auth.getCurrentUser();
-    if (data?.user?.id) {
-      return { "X-InsForge-User": data.user.id };
+    const token = await insforge.getHttpClient().getValidAccessToken();
+    if (token) {
+      return { Authorization: `Bearer ${token}` };
+    }
+    // Check if SDK headers already have Authorization set
+    const clientHeaders = insforge.getHttpClient().getHeaders();
+    if (clientHeaders["Authorization"] || clientHeaders["authorization"]) {
+      return { Authorization: clientHeaders["Authorization"] || clientHeaders["authorization"] };
     }
   } catch {
     // Non-blocking

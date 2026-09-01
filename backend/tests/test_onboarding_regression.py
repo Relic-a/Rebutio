@@ -219,8 +219,8 @@ async def test_multi_turn_spar_history_propagation_e2e():
     properly receives all preceding user and opponent turns.
     """
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        # Start Debate
-        start_resp = await client.post("/api/debates/start", json={"side": "agree", "topicId": "College is no longer worth the financial cost."})
+        # Start Onboarding Debate
+        start_resp = await client.post("/api/debates/start", json={"side": "agree", "onboarding": True})
         assert start_resp.status_code == 200
         session_id = start_resp.json()["session"]["id"]
 
