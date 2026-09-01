@@ -187,8 +187,18 @@ class ProgressRepository:
         outcome: str,
         streak_extended: bool,
         is_onboarding: bool = False,
+        session_id: Optional[str] = None,
     ) -> LearningProgress:
         prog = await self.get_progress(user_id)
+
+        completed_sessions = list(prog.completed_session_ids_json or [])
+        if session_id and session_id in completed_sessions:
+            logger.info("progress.already_recorded_for_session", session_id=session_id, user_id=user_id)
+            return prog
+
+        if session_id:
+            completed_sessions.append(session_id)
+            prog.completed_session_ids_json = completed_sessions
 
         new_wins = prog.wins + (1 if outcome == "user_win" else 0)
         new_losses = prog.losses + (1 if outcome == "opponent_win" else 0)
@@ -513,15 +523,15 @@ class DebateSessionRepository:
         user_id: str,
         outcome: str,
         stars: int,
-        completed: bool,
-        skill_demonstrated: bool,
-        mastery_note: Optional[str],
-        skill_assessment: Optional[dict],
-        argument_feedback: Optional[dict],
-        language_feedback: Optional[dict],
-        xp_earned: int,
-        streak_extended: bool,
-        next_level_unlocked: bool,
+        completed: bool = True,
+        skill_demonstrated: bool = False,
+        mastery_note: Optional[str] = None,
+        skill_assessment: Optional[dict] = None,
+        argument_feedback: Optional[dict] = None,
+        language_feedback: Optional[dict] = None,
+        xp_earned: int = 60,
+        streak_extended: bool = True,
+        next_level_unlocked: bool = True,
         score_technique: int = 8,
         score_grammar: int = 8,
         score_vocabulary: int = 8,
@@ -590,8 +600,6 @@ class DebateSessionRepository:
             )
             self.db.add(review)
 
-        stmt_status = update(DebateSession).where(DebateSession.id == session_id).values(status="finished", updated_at=utcnow())
-        await self.db.execute(stmt_status)
         await self.db.commit()
         return review
 

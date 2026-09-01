@@ -51,27 +51,60 @@ async def test_auth_fail_closed_without_bypass(monkeypatch):
 async def test_production_startup_security_guardrails(monkeypatch):
     """
     Verifies that the backend fails closed on startup if deployed in production with:
+    - Non-PostgreSQL database
+    - Missing InsForge JWT verification configuration
+    - Missing InsForge storage credentials
     - ALLOW_DEV_AUTH_BYPASS enabled
     - Default dev data encryption key
     - Default dev session secret
     """
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "ALLOW_DEV_AUTH_BYPASS", False)
+    monkeypatch.setattr(settings, "DATABASE_URL", "postgresql+asyncpg://postgres:pass@localhost:5432/rebutio")
+    monkeypatch.setattr(settings, "INSFORGE_JWT_SECRET", "custom-prod-jwt-secret-key-123456789")
+    monkeypatch.setattr(settings, "INSFORGE_API_KEY", "custom-prod-api-key-123456789")
+    monkeypatch.setattr(settings, "REBUTIO_DATA_ENCRYPTION_KEY", "custom-prod-encryption-key-32b-length!!")
+    monkeypatch.setattr(settings, "REBUTIO_SESSION_SECRET", "custom-prod-session-secret-32b-length!!")
 
-    # 1. Refuse startup if ALLOW_DEV_AUTH_BYPASS is True in production
+    # 1. Refuse startup if DATABASE_URL is SQLite in production
+    monkeypatch.setattr(settings, "DATABASE_URL", "sqlite+aiosqlite:///./rebutio.db")
+    with pytest.raises(RuntimeError, match="DATABASE_URL must be PostgreSQL"):
+        async with lifespan(app):
+            pass
+    monkeypatch.setattr(settings, "DATABASE_URL", "postgresql+asyncpg://postgres:pass@localhost:5432/rebutio")
+
+    # 2. Refuse startup if ALLOW_DEV_AUTH_BYPASS is True in production
     monkeypatch.setattr(settings, "ALLOW_DEV_AUTH_BYPASS", True)
     with pytest.raises(RuntimeError, match="ALLOW_DEV_AUTH_BYPASS cannot be True in production"):
         async with lifespan(app):
             pass
-
-    # 2. Refuse startup if default encryption key is used in production
     monkeypatch.setattr(settings, "ALLOW_DEV_AUTH_BYPASS", False)
+
+    # 3. Refuse startup if InsForge JWT secret/key is missing
+    monkeypatch.setattr(settings, "INSFORGE_JWT_SECRET", "")
+    monkeypatch.setattr(settings, "INSFORGE_JWT_PUBLIC_KEY", "")
+    with pytest.raises(RuntimeError, match="requires InsForge JWT verification configuration"):
+        async with lifespan(app):
+            pass
+    monkeypatch.setattr(settings, "INSFORGE_JWT_SECRET", "custom-prod-jwt-secret-key-123456789")
+
+    # 4. Refuse startup if InsForge storage credentials are missing
+    monkeypatch.setattr(settings, "INSFORGE_API_KEY", "")
+    monkeypatch.setattr(settings, "INSFORGE_SERVICE_ROLE_KEY", "")
+    monkeypatch.setattr(settings, "INSFORGE_ANON_KEY", "")
+    with pytest.raises(RuntimeError, match="requires InsForge storage credentials"):
+        async with lifespan(app):
+            pass
+    monkeypatch.setattr(settings, "INSFORGE_API_KEY", "custom-prod-api-key-123456789")
+
+    # 5. Refuse startup if default encryption key is used in production
     monkeypatch.setattr(settings, "REBUTIO_DATA_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
     with pytest.raises(RuntimeError, match="REBUTIO_DATA_ENCRYPTION_KEY must be configured"):
         async with lifespan(app):
             pass
-
-    # 3. Refuse startup if default session secret is used in production
     monkeypatch.setattr(settings, "REBUTIO_DATA_ENCRYPTION_KEY", "custom-prod-encryption-key-32b-length!!")
+
+    # 6. Refuse startup if default session secret is used in production
     monkeypatch.setattr(settings, "REBUTIO_SESSION_SECRET", "rebutio-stable-dev-session-secret-key-32b")
     with pytest.raises(RuntimeError, match="REBUTIO_SESSION_SECRET must be configured"):
         async with lifespan(app):
@@ -424,3 +457,171 @@ async def test_production_storage_failure_behavior(monkeypatch):
         stmt = select(MediaAsset).where(MediaAsset.user_id == user_id)
         res = await db.execute(stmt)
         assert res.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_protected_audio_access_without_url_tokens(monkeypatch):
+    """
+    Verifies that media audio endpoints reject URL query parameter tokens
+    when ALLOW_DEV_AUTH_BYPASS is False, and require standard Authorization Bearer header.
+    """
+    monkeypatch.setattr(settings, "ALLOW_DEV_AUTH_BYPASS", False)
+
+    user_id = f"user-audio-auth-{uuid.uuid4().hex[:8]}"
+    token = create_test_auth_token(user_id)
+    dummy_wav = b"RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+
+    async with async_session_factory() as db:
+        asset = await media_storage.save_media_asset(
+            db=db,
+            user_id=user_id,
+            audio_bytes=dummy_wav,
+            mime_type="audio/wav",
+        )
+        asset_id = asset.id
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # 1. Access with query token param must fail with 401
+        url_with_param = f"/api/media/{asset_id}/audio?token={token}"
+        resp_param = await client.get(url_with_param)
+        assert resp_param.status_code == 401
+
+        # 2. Access with Bearer Authorization header must succeed
+        resp_header = await client.get(f"/api/media/{asset_id}/audio", headers={"Authorization": f"Bearer {token}"})
+        assert resp_header.status_code == 200
+        assert resp_header.content == dummy_wav
+
+
+@pytest.mark.asyncio
+async def test_retry_after_progress_already_applied():
+    """
+    Verifies that if progress was already recorded for a session_id (simulating crash before review save),
+    retrying finalization records the review without duplicating XP or debate counts.
+    """
+    from backend.app.domain.orchestration import DebateOrchestrator
+    user_id = f"user-prog-idemp-{uuid.uuid4().hex[:8]}"
+    token = create_test_auth_token(user_id)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        start_resp = await client.post("/api/debates/start", json={"side": "agree", "onboarding": True}, headers=headers)
+        session_id = start_resp.json()["session"]["id"]
+
+        await client.post(
+            f"/api/sessions/{session_id}/turns",
+            data={"transcript": "Argument turn.", "turn_index": 1},
+            headers=headers,
+        )
+
+        # Manually apply progress with session_id beforehand (simulating partial completion)
+        async with async_session_factory() as db:
+            prog_repo = ProgressRepository(db)
+            await prog_repo.record_debate_completion(
+                user_id=user_id,
+                skill_id="counterpoint",
+                stars_earned=2,
+                xp_earned=140,
+                outcome="user_win",
+                streak_extended=True,
+                session_id=session_id,
+            )
+            prog_before = await prog_repo.get_progress(user_id)
+            xp_before = prog_before.xp
+            debates_before = prog_before.debates_completed
+
+        # Run finalization
+        review = await DebateOrchestrator.finalize_debate_review(session_id, user_id)
+        assert review.sessionId == session_id
+
+        # Verify progress was not duplicated
+        async with async_session_factory() as db:
+            prog_repo = ProgressRepository(db)
+            prog_after = await prog_repo.get_progress(user_id)
+            assert prog_after.xp == xp_before
+            assert prog_after.debates_completed == debates_before
+
+
+@pytest.mark.asyncio
+async def test_retry_after_review_exists_but_coach_memory_incomplete():
+    """
+    Verifies that if a review exists in DB but the server crashed before Coach memory / thread was saved,
+    retrying finalization safely finishes Coach memory and initializes the thread.
+    """
+    from backend.app.domain.orchestration import DebateOrchestrator
+    user_id = f"user-review-retry-{uuid.uuid4().hex[:8]}"
+    token = create_test_auth_token(user_id)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        start_resp = await client.post("/api/debates/start", json={"side": "agree", "onboarding": True}, headers=headers)
+        session_id = start_resp.json()["session"]["id"]
+
+        await client.post(
+            f"/api/sessions/{session_id}/turns",
+            data={"transcript": "Clear spoken point.", "turn_index": 1},
+            headers=headers,
+        )
+
+        # Save review into DB manually (simulating crash right after review save)
+        async with async_session_factory() as db:
+            sess_repo = DebateSessionRepository(db)
+            await sess_repo.save_review(
+                session_id=session_id,
+                user_id=user_id,
+                outcome="user_win",
+                stars=2,
+                completed=True,
+                skill_demonstrated=True,
+                xp_earned=140,
+                streak_extended=True,
+                score_technique=8,
+                score_grammar=8,
+                score_vocabulary=8,
+                score_delivery=8,
+            )
+
+        # Request review via API: must resume, update coach memory and thread, and mark finished
+        rev_resp = await client.get(f"/api/sessions/{session_id}/review", headers=headers)
+        assert rev_resp.status_code == 200
+
+        async with async_session_factory() as db:
+            sess_repo = DebateSessionRepository(db)
+            coach_repo = CoachRepository(db)
+
+            sess = await sess_repo.get_session(session_id)
+            assert sess.status == "finished"
+
+            mem_md, _ = await coach_repo.get_memory_markdown(user_id)
+            assert f"<!-- session:{session_id} -->" in mem_md
+
+
+@pytest.mark.asyncio
+async def test_retry_after_coach_memory_already_contains_session():
+    """
+    Verifies that calling CoachEngine.update_coach_memory_after_debate with a debate_summary
+    whose session_id is already marked in Coach memory returns without modifying or duplicating content.
+    """
+    from backend.app.services.coach.engine import CoachEngine
+    user_id = f"user-mem-marker-{uuid.uuid4().hex[:8]}"
+
+    async with async_session_factory() as db:
+        coach_repo = CoachRepository(db)
+        session_id = f"session-marked-{uuid.uuid4().hex[:8]}"
+        initial_md = f"# Coach Memory\n- Baseline memory\n\n<!-- session:{session_id} -->\n"
+        await coach_repo.save_memory_markdown(user_id, initial_md, expected_revision=0)
+
+        debate_summary = {
+            "session_id": session_id,
+            "topic": "Testing Duplicate Prevention",
+            "user_side": "agree",
+            "outcome": "user_win",
+            "stars": 3,
+            "score_technique": 9,
+            "score_grammar": 9,
+            "score_vocabulary": 9,
+            "score_delivery": 9,
+        }
+
+        result_md = await CoachEngine.update_coach_memory_after_debate(db, user_id, debate_summary)
+        assert result_md == initial_md
+        assert result_md.count(f"<!-- session:{session_id} -->") == 1

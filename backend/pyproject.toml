@@ -1,8 +1,11 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "rebutio-backend"
 version = "0.1.0"
 description = "Spoken-English debate learning application backend"
-readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",
@@ -28,7 +31,15 @@ dev = [
     "pytest-cov>=5.0.0",
 ]
 
+[tool.setuptools.package-dir]
+"backend.app" = "app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = [".", ".."]
+

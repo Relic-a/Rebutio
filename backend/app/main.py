@@ -34,11 +34,27 @@ async def lifespan(app: FastAPI):
     DEFAULT_DEV_SESSION_SECRET = "rebutio-stable-dev-session-secret-key-32b"
 
     if settings.ENVIRONMENT == "production":
+        # 1. Database check: must use PostgreSQL in production
+        db_url = settings.DATABASE_URL.lower()
+        if not ("postgresql" in db_url or "postgres" in db_url):
+            raise RuntimeError("CRITICAL PRODUCTION CONFIGURATION ERROR: DATABASE_URL must be PostgreSQL in production!")
+
+        # 2. Auth bypass check: dev auth bypass must be strictly disabled
         if settings.ALLOW_DEV_AUTH_BYPASS:
             raise RuntimeError("CRITICAL SECURITY VIOLATION: ALLOW_DEV_AUTH_BYPASS cannot be True in production!")
-        if settings.REBUTIO_DATA_ENCRYPTION_KEY == DEFAULT_DEV_KEY:
+
+        # 3. JWT verification config check
+        if not (settings.INSFORGE_JWT_SECRET or settings.INSFORGE_JWT_PUBLIC_KEY):
+            raise RuntimeError("CRITICAL CONFIGURATION ERROR: Production requires InsForge JWT verification configuration (INSFORGE_JWT_SECRET or INSFORGE_JWT_PUBLIC_KEY)!")
+
+        # 4. Storage credentials check
+        if not (settings.INSFORGE_API_KEY or settings.INSFORGE_SERVICE_ROLE_KEY or settings.INSFORGE_ANON_KEY):
+            raise RuntimeError("CRITICAL CONFIGURATION ERROR: Production requires InsForge storage credentials (INSFORGE_API_KEY, INSFORGE_SERVICE_ROLE_KEY, or INSFORGE_ANON_KEY)!")
+
+        # 5. Encryption & session secret checks
+        if not settings.REBUTIO_DATA_ENCRYPTION_KEY or settings.REBUTIO_DATA_ENCRYPTION_KEY == DEFAULT_DEV_KEY:
             raise RuntimeError("CRITICAL SECURITY VIOLATION: REBUTIO_DATA_ENCRYPTION_KEY must be configured with a secure key in production!")
-        if settings.REBUTIO_SESSION_SECRET == DEFAULT_DEV_SESSION_SECRET:
+        if not settings.REBUTIO_SESSION_SECRET or settings.REBUTIO_SESSION_SECRET == DEFAULT_DEV_SESSION_SECRET:
             raise RuntimeError("CRITICAL SECURITY VIOLATION: REBUTIO_SESSION_SECRET must be configured with a secure key in production!")
 
     # Log startup configuration safely without secrets

@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { appService, getValidAccessToken, noteCurrentSession } from "@/lib/api";
+import { appService, getAuthenticatedMediaBlobUrl, noteCurrentSession } from "@/lib/api";
 import { capture } from "@/lib/media/capture";
 import { logger } from "@/lib/logger";
 import type { DebateReview, DebateSession, DebateSetup, Speaker } from "@/lib/types";
@@ -131,15 +131,13 @@ export function DebateFlow({
 
   async function prepareAudio(url: string, autoplay: boolean) {
     audioPlayerRef.current?.pause();
-    let playUrl = url;
-    try {
-      const token = await getValidAccessToken();
-      if (token && !url.includes("token=")) {
-        playUrl = `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
-      }
-    } catch {}
+    const blobUrl = await getAuthenticatedMediaBlobUrl(url);
+    if (!blobUrl) {
+      logger.warn("debate_flow.audio_fetch_failed", { url });
+      return;
+    }
 
-    const audio = new Audio(playUrl);
+    const audio = new Audio(blobUrl);
     audioPlayerRef.current = audio;
     attachAudioHandlers(audio);
     if (autoplay) {

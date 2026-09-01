@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     INSFORGE_URL: str = "https://yb269bge.us-east.insforge.app"
     INSFORGE_ANON_KEY: Optional[str] = "anon_5042180029b5d24c41a999b3b07eabd76b6f740aa6749b5358bd95e4d6fe42b5"
     INSFORGE_API_KEY: Optional[str] = None
+    INSFORGE_SERVICE_ROLE_KEY: Optional[str] = None
     INSFORGE_JWT_SECRET: Optional[str] = None
     INSFORGE_JWT_PUBLIC_KEY: Optional[str] = None
     STORAGE_BUCKET_NAME: str = "rebutio-media"

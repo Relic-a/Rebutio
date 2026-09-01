@@ -53,6 +53,7 @@ class LearningProgress(Base):
     losses = Column(Integer, default=0, nullable=False)
     draws = Column(Integer, default=0, nullable=False)
     stars_by_node_json = Column(JSON, default=dict, nullable=False)
+    completed_session_ids_json = Column(JSON, default=list, nullable=True)
     placement_completed = Column(Boolean, default=False, nullable=False)
     placement_skill_id = Column(String(64), nullable=True)
 

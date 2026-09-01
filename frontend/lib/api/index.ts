@@ -66,6 +66,28 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
   return {};
 }
 
+export async function getAuthenticatedMediaBlobUrl(url: string): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+  // If already a blob URL or external absolute URL that doesn't need proxy, return directly
+  if (url.startsWith("blob:")) return url;
+
+  const apiHost = process.env.NEXT_PUBLIC_API_URL ?? (typeof window !== "undefined" ? "" : "http://localhost:8000");
+  const targetUrl = url.startsWith("http") ? url : `${apiHost}${url}`;
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch(targetUrl, { headers });
+    if (!res.ok) {
+      logger.warn("media.fetch_failed", { status: res.status, url: targetUrl });
+      return null;
+    }
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  } catch (err) {
+    logger.error("media.blob_create_failed", { url: targetUrl }, err);
+    return null;
+  }
+}
+
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export type BootstrapInfo = {
@@ -308,41 +330,67 @@ export function createHttpService(baseUrl: string = ""): AppService {
     },
 
     observeDebateSession(sessionId, onEvent) {
-      if (typeof window === "undefined" || typeof EventSource === "undefined") {
+      if (typeof window === "undefined") {
         return () => {};
       }
 
-      let es: EventSource | null = null;
       let isClosed = false;
+      const abortController = new AbortController();
 
       (async () => {
         try {
-          const token = await getValidAccessToken();
+          const headers = await getAuthHeaders();
           if (isClosed) return;
-          const urlStr = `${apiBase}/api/sessions/${sessionId}/events${token ? `?token=${encodeURIComponent(token)}` : ""}`;
-          es = new EventSource(urlStr, {
-            withCredentials: true,
+
+          const response = await fetch(`${apiBase}/api/sessions/${sessionId}/events`, {
+            headers: {
+              ...headers,
+              Accept: "text/event-stream",
+            },
+            signal: abortController.signal,
           });
 
-          es.onmessage = (e) => {
-            try {
-              const parsed = JSON.parse(e.data);
-              onEvent(parsed);
-            } catch {}
-          };
+          if (!response.ok || !response.body) {
+            logger.warn("event_stream.fetch_failed", { sessionId, status: response.status });
+            return;
+          }
 
-          es.onerror = () => {
-            logger.warn("event_stream.closed", { sessionId });
-            if (es) es.close();
-          };
-        } catch (err) {
-          logger.error("event_stream.init_failed", { sessionId }, err);
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (!isClosed) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n\n");
+            buffer = lines.pop() || "";
+
+            for (const chunk of lines) {
+              const dataLine = chunk
+                .split("\n")
+                .find((l) => l.startsWith("data:"));
+              if (dataLine) {
+                const jsonStr = dataLine.slice(5).trim();
+                if (jsonStr) {
+                  try {
+                    const parsed = JSON.parse(jsonStr);
+                    onEvent(parsed);
+                  } catch {}
+                }
+              }
+            }
+          }
+        } catch (err: any) {
+          if (err?.name !== "AbortError" && !isClosed) {
+            logger.warn("event_stream.closed", { sessionId, error: String(err) });
+          }
         }
       })();
 
       return () => {
         isClosed = true;
-        if (es) es.close();
+        abortController.abort();
       };
     },
 

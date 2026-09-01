@@ -13,9 +13,24 @@ from backend.app.models.schemas import (
     StructuredVocabularyFinding,
 )
 from backend.app.config import settings
+from backend.app.persistence.db import init_db
 from backend.app.services.ai.config import AICompletionResult
 from backend.app.services.ai.gateway import ai_gateway
 from backend.app.services.modal.client import modal_speech_client
+
+
+_db_initialized = False
+
+
+@pytest.fixture(autouse=True)
+async def initialize_test_database():
+    """
+    Ensures SQLite tables and columns are initialized once for test sessions.
+    """
+    global _db_initialized
+    if not _db_initialized:
+        await init_db()
+        _db_initialized = True
 
 
 @pytest.fixture(autouse=True)
@@ -86,6 +101,25 @@ def mock_all_external_ai_services(monkeypatch):
                 ]
             )
             content = sample_topics.model_dump_json()
+
+        elif "memory curator for Rebutio Coach" in first_content or "COACH MEMORY" in first_content:
+            sample_memory = """# Rebutio Coach Memory
+
+## User Preferences & Goals
+- Focus: Structure arguments clearly.
+
+## Historical Summary
+- No historical debate summaries yet.
+
+## Recent Debates
+### [2026-08-31] Debate: Social Media Impact
+- Stance: Agree | Outcome: User Win | Stars: 2/3
+- Technique (8/10): Challenged opposing assumptions.
+- Delivery (8/10): Confident pacing.
+- Standout Moment: Maintained strong counterpoints.
+- Primary Focus For Next Time: State thesis earlier.
+"""
+            content = sample_memory
 
         else:
             # Spoken debate opponent argument (2-4 sentences)

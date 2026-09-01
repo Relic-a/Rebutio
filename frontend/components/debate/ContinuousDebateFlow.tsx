@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { appService, getValidAccessToken, noteCurrentSession } from "@/lib/api";
+import { appService, getAuthenticatedMediaBlobUrl, noteCurrentSession } from "@/lib/api";
 import { capture } from "@/lib/media/capture";
 import { logger } from "@/lib/logger";
 import type { DebateReview, DebateSession, DebateSetup, Speaker } from "@/lib/types";
@@ -128,15 +128,13 @@ export function ContinuousDebateFlow({
       audioPlayerRef.current = new Audio();
     }
 
-    let playUrl = url;
-    try {
-      const token = await getValidAccessToken();
-      if (token && !url.includes("token=")) {
-        playUrl = `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
-      }
-    } catch {}
+    const blobUrl = await getAuthenticatedMediaBlobUrl(url);
+    if (!blobUrl) {
+      logger.warn("audio.fetch_failed", { turnId, url });
+      return;
+    }
 
-    audioPlayerRef.current.src = playUrl;
+    audioPlayerRef.current.src = blobUrl;
     audioPlayerRef.current.play().catch((e) => logger.warn("audio.play_failed", { error: String(e) }));
     setActiveAudioPlaying(turnId);
 

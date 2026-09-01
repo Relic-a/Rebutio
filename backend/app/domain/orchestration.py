@@ -712,6 +712,7 @@ class DebateOrchestrator:
                         outcome=outcome,
                         streak_extended=True,
                         is_onboarding=session.is_onboarding,
+                        session_id=session_id,
                     )
                     logger.info(
                         "session.progress.updated",
@@ -720,6 +721,7 @@ class DebateOrchestrator:
                         xp_earned=xp_earned,
                         outcome=outcome,
                         is_onboarding=session.is_onboarding,
+                        session_id=session_id,
                     )
 
                     # Update compact persistent speech profile
@@ -767,6 +769,7 @@ class DebateOrchestrator:
                 try:
                     from backend.app.services.coach.engine import CoachEngine
                     debate_summary = {
+                        "session_id": session_id,
                         "topic": session.topic_text,
                         "user_side": session.user_side,
                         "outcome": outcome,

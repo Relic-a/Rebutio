@@ -34,11 +34,6 @@ def extract_bearer_token(request: Request, cookie_token: Optional[str] = None) -
     if insforge_header:
         return insforge_header.strip()
 
-    # Query param token for EventSource (SSE) and audio streaming
-    query_token = request.query_params.get("token") or request.query_params.get("access_token")
-    if query_token:
-        return query_token.strip()
-
     if cookie_token:
         return cookie_token.strip()
 

@@ -64,6 +64,13 @@ class CoachEngine:
         coach_repo = CoachRepository(db)
         prev_md, rev = await coach_repo.get_memory_markdown(user_id)
         today = datetime.date.today().isoformat()
+        session_id = debate_summary.get("session_id")
+        session_marker = f"<!-- session:{session_id} -->" if session_id else None
+
+        # Idempotency check: if this session was already recorded in coach memory, return current memory
+        if session_marker and session_marker in prev_md:
+            logger.info("coach.memory.already_recorded_for_session", session_id=session_id, user_id=user_id)
+            return prev_md
 
         prompt_msgs = build_coach_memory_update_prompt(
             previous_memory_markdown=prev_md,
@@ -82,11 +89,19 @@ class CoachEngine:
             logger.warning("coach.memory_update_ai_failed", error=str(e))
             updated_md = prev_md
 
+        # Append session marker so subsequent retries are strictly idempotent
+        if session_marker and session_marker not in updated_md:
+            updated_md = f"{updated_md.rstrip()}\n\n{session_marker}\n"
+
         saved, new_rev = await coach_repo.save_memory_markdown(user_id, updated_md, expected_revision=rev)
         if not saved:
             logger.info("coach.memory.concurrency_conflict_retrying", user_id=user_id, expected_rev=rev)
             # 1. Reload latest Markdown and revision
             latest_md, latest_rev = await coach_repo.get_memory_markdown(user_id)
+            if session_marker and session_marker in latest_md:
+                logger.info("coach.memory.already_recorded_in_latest", session_id=session_id, user_id=user_id)
+                return latest_md
+
             # 2. Rerun memory-update AI using the latest Markdown plus the new debate findings
             retry_prompt_msgs = build_coach_memory_update_prompt(
                 previous_memory_markdown=latest_md,
@@ -103,6 +118,9 @@ class CoachEngine:
             except Exception as e:
                 logger.warning("coach.memory_update_retry_ai_failed", error=str(e))
                 retry_updated_md = latest_md
+
+            if session_marker and session_marker not in retry_updated_md:
+                retry_updated_md = f"{retry_updated_md.rstrip()}\n\n{session_marker}\n"
 
             # 3. Retry the save once with the latest revision
             retry_saved, _ = await coach_repo.save_memory_markdown(user_id, retry_updated_md, expected_revision=latest_rev)
