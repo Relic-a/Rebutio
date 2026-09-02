@@ -29,7 +29,10 @@ Return integer scores from 1 to 10.
 - delivery: only score from evidence actually present in the transcript or supplied metadata. Do not infer tone, confidence, pronunciation, or pacing from plain text alone.
 
 FEEDBACK STYLE:
-- Be specific. Point to a concrete turn or argument rather than generic praise.
+- Debate adjudication is secondary context for a language-learning app.
+- strongest_moment and improvement_opportunity must focus on spoken language visible in the transcript: grammar, vocabulary, sentence clarity, or phrasing. Never claim a pronunciation, accent, tone, or pacing issue from text alone.
+- Keep argument_strength and argument_improvement for the separate adjudication details only.
+- Be specific. Point to a concrete turn or phrase rather than generic praise.
 - strongest_moment should identify the user's best actual argumentative move.
 - improvement_opportunity should name the single highest-value change they could make next time.
 - Keep feedback concise, plain, and useful. Avoid motivational filler.
@@ -52,8 +55,8 @@ OUTPUT FORMAT (STRICT JSON):
   "score_grammar_rubric": "One sentence explaining the grammar score.",
   "score_vocabulary_rubric": "One sentence explaining the vocabulary score.",
   "score_delivery_rubric": "One sentence explaining the delivery score and evidence limits.",
-  "strongest_moment": "A concrete moment from the user's debate.",
-  "improvement_opportunity": "One specific, actionable adjustment."
+  "strongest_moment": "A concrete spoken-language strength visible in the transcript.",
+  "improvement_opportunity": "One specific language adjustment visible in the transcript; do not infer pronunciation."
 }
 """
 
