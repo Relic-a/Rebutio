@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { appService } from "@/lib/api";
 import { capture } from "@/lib/media/capture";
 import { logger } from "@/lib/logger";
+import { PronunciationText } from "@/components/coach/PronunciationText";
 import type { CoachMessage, CoachThreadDetail } from "@/lib/types";
 
 export default function GeneralCoachThreadPage() {
@@ -188,7 +189,11 @@ export default function GeneralCoachThreadPage() {
                           : "bg-rally text-white rounded-br-sm shadow"
                       }`}
                     >
-                      <p className="whitespace-pre-wrap">{m.text}</p>
+                      {isCoach && m.text ? (
+                        <PronunciationText text={m.text} className="whitespace-pre-wrap" />
+                      ) : (
+                        <p className="whitespace-pre-wrap">{m.text}</p>
+                      )}
                       {m.messageType === "audio" && (
                         <div className="mt-1 flex items-center gap-1 text-[11px] opacity-80 font-mono">
                           <span>🎤 Spoken practice audio</span>
