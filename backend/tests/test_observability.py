@@ -183,11 +183,11 @@ def test_prompt_leak_detection_heuristics():
 
 
 def test_prompt_versions_explicit():
-    assert get_prompt_version("debate_opponent") == "debate_opponent:v1"
-    assert get_prompt_version("topic_generator") == "topic_generator:v1"
-    assert get_prompt_version("language_analysis") == "language_analysis:v1"
-    assert get_prompt_version("final_language_patch") == "final_language_patch:v1"
-    assert get_prompt_version("debate_reviewer") == "debate_reviewer:v1"
+    assert get_prompt_version("debate_opponent") == "debate_opponent:v2"
+    assert get_prompt_version("topic_generator") == "topic_generator:v2"
+    assert get_prompt_version("language_analysis") == "language_analysis:v2"
+    assert get_prompt_version("final_language_patch") == "final_language_patch:v2"
+    assert get_prompt_version("debate_reviewer") == "debate_reviewer:v2"
 
 
 def test_sensitive_debug_formatting():

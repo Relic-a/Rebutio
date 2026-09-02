@@ -82,10 +82,18 @@ class FrontendLogger {
 
   public error(event: string, context?: LogContext, error?: any) {
     const sanitized = sanitizeContext(context);
-    const errDetails = error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : error;
+    const errDetails = error instanceof Error
+      ? {
+          name: error.name,
+          message: error.message,
+          stack: error.stack,
+          status: (error as Error & { status?: number }).status,
+          requestId: (error as Error & { requestId?: string }).requestId,
+        }
+      : error;
     console.error(`[ERROR] ${event}`, {
       ...sanitized,
-      error: errDetails,
+      ...(errDetails !== undefined ? { error: errDetails } : {}),
       requestId: this.lastRequestId ?? undefined,
     });
   }

@@ -62,22 +62,34 @@ function Results() {
   const r: DebateReview = review;
 
   const outcomeLabel =
-    r.outcome === "user_win" ? "You Won" : r.outcome === "opponent_win" ? "Rebutio Won" : r.outcome === "draw" ? "Draw" : "Debate Concluded";
+    r.outcome === "user_win"
+      ? "You Won"
+      : r.outcome === "opponent_win"
+      ? "Rebutio Won"
+      : r.outcome === "draw"
+      ? "Draw"
+      : "Undetermined";
   const outcomeColor =
-    r.outcome === "user_win" ? "bg-amber-soft text-amber-900 border-amber/30" : r.outcome === "opponent_win" ? "bg-coral-soft text-coral border-coral/30" : "bg-rally-mist text-rally-deep border-rally/30";
+    r.outcome === "user_win"
+      ? "bg-amber-soft text-amber-900 border-amber/30"
+      : r.outcome === "opponent_win"
+      ? "bg-coral-soft text-coral border-coral/30"
+      : r.outcome === "draw"
+      ? "bg-rally-mist text-rally-deep border-rally/30"
+      : "bg-ink/5 text-ink-soft border-ink/15";
 
   // Spoken-language scores
-  const scoreClarity = r.languageFeedback?.clarity?.score ?? 0;
+  const scoreClarity = r.languageFeedback?.clarity?.score ?? null;
   const rubricClarity = r.languageFeedback?.clarity?.summary ?? "How easily a listener could follow your spoken ideas.";
 
-  const scoreGrammar = r.scoreGrammar?.score ?? 0;
-  const rubricGrammar = r.scoreGrammar?.rubric ?? r.languageFeedback?.grammar?.summary ?? "Clean grammatical structures under live pressure.";
+  const scoreGrammar = r.scoreGrammar?.score ?? null;
+  const rubricGrammar = r.scoreGrammar?.rubric ?? r.languageFeedback?.grammar?.summary ?? "Insufficient speech sample to evaluate grammar.";
 
-  const scoreVocabulary = r.scoreVocabulary?.score ?? 0;
-  const rubricVocabulary = r.scoreVocabulary?.rubric ?? r.languageFeedback?.vocabulary?.summary ?? "Persuasive and topic-appropriate terminology.";
+  const scoreVocabulary = r.scoreVocabulary?.score ?? null;
+  const rubricVocabulary = r.scoreVocabulary?.rubric ?? r.languageFeedback?.vocabulary?.summary ?? "Insufficient vocabulary sample to evaluate.";
 
-  const scoreDelivery = r.scoreDelivery?.score ?? 0;
-  const rubricDelivery = r.scoreDelivery?.rubric ?? r.languageFeedback?.fluency?.summary ?? "Confident delivery with steady pace.";
+  const scoreDelivery = r.scoreDelivery?.score ?? null;
+  const rubricDelivery = r.scoreDelivery?.rubric ?? r.languageFeedback?.fluency?.summary ?? "Insufficient audio recording length to evaluate delivery.";
 
   const pronunciationFindings = r.languageFeedback?.pronunciation ?? [];
   const strongestMoment = r.languageFeedback?.clarity?.summary || r.languageFeedback?.grammar?.summary || r.languageFeedback?.vocabulary?.summary || r.strongestMoment || "Your speech stayed understandable through the exchange.";
@@ -100,9 +112,15 @@ function Results() {
 
         {/* Badges */}
         <div className="mt-3 flex items-center justify-center gap-3 text-xs font-bold">
-          <span className="rounded-full bg-rally-mist px-3 py-1 text-rally-deep">
-            +{r.xpEarned || 120} XP
-          </span>
+          {r.xpEarned > 0 ? (
+            <span className="rounded-full bg-rally-mist px-3 py-1 text-rally-deep">
+              +{r.xpEarned} XP
+            </span>
+          ) : (
+            <span className="rounded-full bg-ink/5 px-3 py-1 text-ink-soft">
+              Session Recorded
+            </span>
+          )}
           {r.streakExtended && (
             <span className="rounded-full bg-amber-soft px-3 py-1 text-amber-900">
               🔥 Streak Maintained
@@ -128,7 +146,14 @@ function Results() {
             <div className="flex items-baseline justify-between">
               <span className="text-xs font-bold text-ink">Clarity</span>
               <span className="font-mono text-lg font-black text-rally">
-                {scoreClarity > 0 ? scoreClarity : "—"}{scoreClarity > 0 && <span className="text-xs text-ink-soft">/10</span>}
+                {scoreClarity !== null && scoreClarity > 0 ? (
+                  <>
+                    {scoreClarity}
+                    <span className="text-xs text-ink-soft">/10</span>
+                  </>
+                ) : (
+                  <span className="text-ink-soft text-base font-medium">—</span>
+                )}
               </span>
             </div>
             <p className="mt-1.5 text-[11px] text-ink-soft leading-tight line-clamp-2">{rubricClarity}</p>
@@ -139,7 +164,14 @@ function Results() {
             <div className="flex items-baseline justify-between">
               <span className="text-xs font-bold text-ink">Grammar</span>
               <span className="font-mono text-lg font-black text-rally">
-                {scoreGrammar > 0 ? scoreGrammar : "—"}{scoreGrammar > 0 && <span className="text-xs text-ink-soft">/10</span>}
+                {scoreGrammar !== null && scoreGrammar > 0 ? (
+                  <>
+                    {scoreGrammar}
+                    <span className="text-xs text-ink-soft">/10</span>
+                  </>
+                ) : (
+                  <span className="text-ink-soft text-base font-medium">—</span>
+                )}
               </span>
             </div>
             <p className="mt-1.5 text-[11px] text-ink-soft leading-tight line-clamp-2">{rubricGrammar}</p>
@@ -150,7 +182,14 @@ function Results() {
             <div className="flex items-baseline justify-between">
               <span className="text-xs font-bold text-ink">Vocabulary</span>
               <span className="font-mono text-lg font-black text-rally">
-                {scoreVocabulary > 0 ? scoreVocabulary : "—"}{scoreVocabulary > 0 && <span className="text-xs text-ink-soft">/10</span>}
+                {scoreVocabulary !== null && scoreVocabulary > 0 ? (
+                  <>
+                    {scoreVocabulary}
+                    <span className="text-xs text-ink-soft">/10</span>
+                  </>
+                ) : (
+                  <span className="text-ink-soft text-base font-medium">—</span>
+                )}
               </span>
             </div>
             <p className="mt-1.5 text-[11px] text-ink-soft leading-tight line-clamp-2">{rubricVocabulary}</p>
@@ -161,7 +200,14 @@ function Results() {
             <div className="flex items-baseline justify-between">
               <span className="text-xs font-bold text-ink">Delivery</span>
               <span className="font-mono text-lg font-black text-rally">
-                {scoreDelivery > 0 ? scoreDelivery : "—"}{scoreDelivery > 0 && <span className="text-xs text-ink-soft">/10</span>}
+                {scoreDelivery !== null && scoreDelivery > 0 ? (
+                  <>
+                    {scoreDelivery}
+                    <span className="text-xs text-ink-soft">/10</span>
+                  </>
+                ) : (
+                  <span className="text-ink-soft text-base font-medium">—</span>
+                )}
               </span>
             </div>
             <p className="mt-1.5 text-[11px] text-ink-soft leading-tight line-clamp-2">{rubricDelivery}</p>
@@ -202,18 +248,20 @@ function Results() {
         transition={{ delay: 0.25 }}
         className="mt-5 space-y-2.5"
       >
-        <div className="rounded-2xl bg-rally-mist/60 border border-rally/15 p-3.5">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-rally-deep">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-              <polyline points="22 4 12 14.01 9 11.01" />
-            </svg>
-            <span>What Worked in Your Speech</span>
+        {strongestMoment && (
+          <div className="rounded-2xl bg-rally-mist/60 border border-rally/15 p-3.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-rally-deep">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
+              <span>What Worked in Your Speech</span>
+            </div>
+            <p className="mt-1.5 text-xs font-medium text-ink leading-relaxed">
+              <PronunciationText text={strongestMoment} className="whitespace-pre-wrap" />
+            </p>
           </div>
-          <p className="mt-1.5 text-xs font-medium text-ink leading-relaxed">
-            <PronunciationText text={strongestMoment} className="whitespace-pre-wrap" />
-          </p>
-        </div>
+        )}
 
         <div className="rounded-2xl bg-amber-soft/60 border border-amber/20 p-3.5">
           <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900">

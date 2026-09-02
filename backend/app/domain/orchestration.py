@@ -195,7 +195,7 @@ class DebateOrchestrator:
                 # -------------------------------------------------------------------
                 # Continuous turn:
                 # Modal task runs in background and saves evidence.
-                # Debate critical path: DeepSeek opponent -> TTS.
+                # Debate critical path: GPT-5.6 Luna opponent -> TTS.
                 # -------------------------------------------------------------------
                 if modal_task is not None:
                     asyncio.create_task(
@@ -546,6 +546,22 @@ class DebateOrchestrator:
 
                 user = await user_repo.get_or_create_user(user_id)
 
+                turns = await sess_repo.get_turns(session_id)
+                all_evidence = await sess_repo.get_all_temporary_evidence(session_id)
+                full_transcript = []
+                for t in turns:
+                    txt = encryptor.decrypt_str(t.text_encrypted) if t.text_encrypted else ""
+                    full_transcript.append({
+                        "speaker": t.speaker,
+                        "turn_number": t.turn_number,
+                        "text": txt,
+                        "audio_available": getattr(t, "audio_available", False),
+                        "duration_sec": getattr(t, "duration_sec", 0.0),
+                    })
+
+                from backend.app.domain.evidence import assess_debate_evidence
+                evidence_assessment = assess_debate_evidence(full_transcript, all_evidence)
+
                 if existing_review:
                     db_review = existing_review
                     outcome = db_review.outcome
@@ -554,71 +570,41 @@ class DebateOrchestrator:
                     score_gram = db_review.score_grammar
                     score_vocab = db_review.score_vocabulary
                     score_deliv = db_review.score_delivery
-                    strongest_mom = db_review.strongest_moment or ""
-                    improve_opp = db_review.improvement_opportunity or ""
-                    rubric_tech = db_review.score_technique_rubric or ""
-                    rubric_gram = db_review.score_grammar_rubric or ""
-                    rubric_vocab = db_review.score_vocabulary_rubric or ""
-                    rubric_deliv = db_review.score_delivery_rubric or ""
+                    strongest_mom = db_review.strongest_moment
+                    improve_opp = db_review.improvement_opportunity
+                    rubric_tech = db_review.score_technique_rubric
+                    rubric_gram = db_review.score_grammar_rubric
+                    rubric_vocab = db_review.score_vocabulary_rubric
+                    rubric_deliv = db_review.score_delivery_rubric
                     lang_feedback = encryptor.decrypt_json(db_review.language_feedback_encrypted) if db_review.language_feedback_encrypted else None
                 else:
-                    turns = await sess_repo.get_turns(session_id)
-                    full_transcript = []
-                    for t in turns:
-                        txt = encryptor.decrypt_str(t.text_encrypted) if t.text_encrypted else ""
-                        full_transcript.append({"speaker": t.speaker, "turn_number": t.turn_number, "text": txt})
-
-                    opp_side = "disagree" if session.user_side == "agree" else "agree"
-
-                    # Task A: Independent Debate Reviewer (does not need phonemes)
-                    reviewer_messages = build_debate_reviewer_prompt(
-                        topic=session.topic_text,
-                        user_side=session.user_side,
-                        opponent_side=opp_side,
-                        skill_id=session.skill_id,
-                        skill_name=session.skill_name,
-                        difficulty=session.difficulty,
-                        full_transcript=full_transcript,
-                    )
-                    reviewer_task = asyncio.create_task(ai_gateway.review_debate(reviewer_messages))
-
-                    # Task B: Final Language Patch (uses pre_final analysis + final turn evidence)
-                    pre_final = await sess_repo.get_pre_final_analysis(session_id)
-                    all_evidence = await sess_repo.get_all_temporary_evidence(session_id)
-                    final_turn_evidence = all_evidence[-1] if all_evidence else {}
-
-                    if pre_final:
-                        logger.info("language_patch.started", session_id=session_id)
-                        patch_messages = build_final_patch_prompt(
-                            pre_final_analysis=pre_final,
-                            final_turn_evidence=final_turn_evidence,
-                            topic=session.topic_text,
-                            target_skill=session.skill_name,
+                    if not evidence_assessment.has_sufficient_evidence:
+                        logger.info(
+                            "debate_review.insufficient_evidence",
+                            session_id=session_id,
+                            user_turns=evidence_assessment.user_turns_count,
+                            substantive_turns=evidence_assessment.substantive_turns_count,
+                            total_words=evidence_assessment.total_user_words,
+                            reason=evidence_assessment.insufficient_reason,
                         )
-                        patch_task = asyncio.create_task(ai_gateway.patch_final_language(patch_messages))
-                    else:
-                        logger.info("language_analysis.started", session_id=session_id)
-                        patch_messages = build_language_analysis_prompt(
-                            topic=session.topic_text,
-                            target_skill=session.skill_name,
-                            difficulty=session.difficulty,
-                            turns_evidence=[{"turn_number": i + 1, "evidence": ev} for i, ev in enumerate(all_evidence)],
-                        )
-                        patch_task = asyncio.create_task(ai_gateway.analyze_language(patch_messages))
-
-                    results = await asyncio.gather(reviewer_task, patch_task, return_exceptions=True)
-                    reviewer_res = results[0] if not isinstance(results[0], Exception) else None
-                    patch_res = results[1] if not isinstance(results[1], Exception) else None
-
-                    user_turns = [t for t in full_transcript if t.get("speaker") == "user" and t.get("text")]
-                    has_sufficient_evidence = len(user_turns) >= 1
-
-                    if not has_sufficient_evidence:
                         outcome = "undetermined"
                         skill_demo = False
-                        final_stars = 1
+                        final_stars = 0
+                        xp_earned = 0
+                        streak_extended = False
+                        next_level_unlocked = False
+                        score_tech = None
+                        score_gram = None
+                        score_vocab = None
+                        score_deliv = None
+                        rubric_tech = "Insufficient debate exchanges to evaluate technique."
+                        rubric_gram = "Insufficient speech data to evaluate grammar."
+                        rubric_vocab = "Insufficient vocabulary sample from this session."
+                        rubric_deliv = "Insufficient audio recording length to evaluate delivery."
+                        strongest_mom = None
+                        improve_opp = "Engage in at least two full debate turns with reasons and examples to receive targeted coaching."
                         arg_feedback = {
-                            "strength": "Session concluded before debate exchanges could be established.",
+                            "strength": "Session concluded before substantive debate arguments were established.",
                             "improvement": "Engage in full debate exchanges to receive strategic feedback.",
                             "insight": None,
                         }
@@ -627,81 +613,121 @@ class DebateOrchestrator:
                             "demonstrated": False,
                             "summary": "Session ended before target skill could be demonstrated.",
                         }
-                        score_tech = 0
-                        score_gram = 0
-                        score_vocab = 0
-                        score_deliv = 0
-                        rubric_tech = "Insufficient debate exchanges to evaluate technique."
-                        rubric_gram = "Insufficient speech data to evaluate grammar."
-                        rubric_vocab = "Insufficient vocabulary sample from this session."
-                        rubric_deliv = "Insufficient audio recording length to evaluate delivery."
-                        strongest_mom = "Insufficient debate exchanges to isolate a standout moment."
-                        improve_opp = "Engage in more exchanges to generate targeted improvement feedback."
+                        lang_feedback = None
+                        reviewer_res = None
+                        patch_res = None
                     else:
-                        outcome = reviewer_res.outcome if reviewer_res else "undetermined"
+                        opp_side = "disagree" if session.user_side == "agree" else "agree"
+
+                        # Task A: Independent Debate Reviewer (does not need phonemes)
+                        reviewer_messages = build_debate_reviewer_prompt(
+                            topic=session.topic_text,
+                            user_side=session.user_side,
+                            opponent_side=opp_side,
+                            skill_id=session.skill_id,
+                            skill_name=session.skill_name,
+                            difficulty=session.difficulty,
+                            full_transcript=full_transcript,
+                        )
+                        reviewer_task = asyncio.create_task(ai_gateway.review_debate(reviewer_messages))
+
+                        # Task B: Final Language Patch (uses pre_final analysis + final turn evidence)
+                        pre_final = await sess_repo.get_pre_final_analysis(session_id)
+                        final_turn_evidence = all_evidence[-1] if all_evidence else {}
+
+                        if pre_final:
+                            logger.info("language_patch.started", session_id=session_id)
+                            patch_messages = build_final_patch_prompt(
+                                pre_final_analysis=pre_final,
+                                final_turn_evidence=final_turn_evidence,
+                                topic=session.topic_text,
+                                target_skill=session.skill_name,
+                            )
+                            patch_task = asyncio.create_task(ai_gateway.patch_final_language(patch_messages))
+                        else:
+                            logger.info("language_analysis.started", session_id=session_id)
+                            patch_messages = build_language_analysis_prompt(
+                                topic=session.topic_text,
+                                target_skill=session.skill_name,
+                                difficulty=session.difficulty,
+                                turns_evidence=[{"turn_number": i + 1, "evidence": ev} for i, ev in enumerate(all_evidence)],
+                            )
+                            patch_task = asyncio.create_task(ai_gateway.analyze_language(patch_messages))
+
+                        results = await asyncio.gather(reviewer_task, patch_task, return_exceptions=True)
+                        reviewer_res = results[0] if not isinstance(results[0], Exception) else None
+                        patch_res = results[1] if not isinstance(results[1], Exception) else None
+
+                        outcome = reviewer_res.outcome if reviewer_res and reviewer_res.outcome in ("user_win", "opponent_win", "draw", "undetermined") else "undetermined"
                         skill_demo = reviewer_res.target_skill_demonstrated if reviewer_res else False
-                        mastery_stars = reviewer_res.mastery_stars if reviewer_res else 1
+                        mastery_stars = reviewer_res.mastery_stars if reviewer_res and reviewer_res.mastery_stars in (1, 2, 3) else 1
                         final_stars = max(1, min(3, mastery_stars))
+                        xp_earned = 100 + (final_stars * 20)
+                        streak_extended = True
+                        next_level_unlocked = (final_stars >= 1)
 
                         arg_feedback = {
-                            "strength": reviewer_res.argument_strength if reviewer_res else "You articulated your position clearly across the exchange.",
-                            "improvement": reviewer_res.argument_improvement if reviewer_res else "Push more aggressively on the core opposing premise.",
+                            "strength": reviewer_res.argument_strength if reviewer_res and reviewer_res.argument_strength else "You articulated your position across the exchange.",
+                            "improvement": reviewer_res.argument_improvement if reviewer_res and reviewer_res.argument_improvement else "Push more aggressively on the core opposing premise.",
                             "insight": reviewer_res.strategic_insight if reviewer_res else None,
                         }
 
                         skill_assessment = {
                             "targetSkill": session.skill_id,
                             "demonstrated": skill_demo,
-                            "summary": reviewer_res.skill_summary if reviewer_res else f"Addressed the topic with focus on {session.skill_name}.",
+                            "summary": reviewer_res.skill_summary if reviewer_res and reviewer_res.skill_summary else f"Addressed the topic with focus on {session.skill_name}.",
                         }
 
                         if reviewer_res:
-                            score_tech = getattr(reviewer_res, "score_technique", 8)
-                            score_gram = getattr(reviewer_res, "score_grammar", 8)
-                            score_vocab = getattr(reviewer_res, "score_vocabulary", 8)
-                            score_deliv = getattr(reviewer_res, "score_delivery", 8)
-                            rubric_tech = getattr(reviewer_res, "score_technique_rubric", "Directly addressed opposing claims with clear argumentative logic.")
-                            rubric_gram = getattr(reviewer_res, "score_grammar_rubric", "Clean sentence structures with minimal syntactic friction under pressure.")
-                            rubric_vocab = getattr(reviewer_res, "score_vocabulary_rubric", "Appropriate and precise word choices tailored to the topic.")
-                            rubric_deliv = getattr(reviewer_res, "score_delivery_rubric", "Consistent pacing with natural pauses between points.")
-                            strongest_mom = getattr(reviewer_res, "strongest_moment", "Your direct refutation of the core premise held firm.")
-                            improve_opp = getattr(reviewer_res, "improvement_opportunity", "Introduce your main supporting evidence earlier in the turn.")
+                            score_tech = reviewer_res.score_technique
+                            score_gram = reviewer_res.score_grammar
+                            score_vocab = reviewer_res.score_vocabulary
+                            if evidence_assessment.has_sufficient_delivery_evidence:
+                                score_deliv = reviewer_res.score_delivery
+                                rubric_deliv = reviewer_res.score_delivery_rubric or "Consistent pacing with natural pauses between points."
+                            else:
+                                score_deliv = None
+                                rubric_deliv = "No audio recording available to evaluate spoken delivery."
+
+                            rubric_tech = reviewer_res.score_technique_rubric or "Directly addressed opposing claims with clear argumentative logic."
+                            rubric_gram = reviewer_res.score_grammar_rubric or "Clean sentence structures with minimal syntactic friction under pressure."
+                            rubric_vocab = reviewer_res.score_vocabulary_rubric or "Appropriate and precise word choices tailored to the topic."
+                            strongest_mom = reviewer_res.strongest_moment
+                            improve_opp = reviewer_res.improvement_opportunity
                         else:
-                            # Grounded fallback when AI reviewer is unavailable
-                            score_tech = 7
-                            score_gram = 7
-                            score_vocab = 7
-                            score_deliv = 7
+                            # Grounded uninflated fallback when AI reviewer is unavailable
+                            score_tech = None
+                            score_gram = None
+                            score_vocab = None
+                            score_deliv = None
                             rubric_tech = f"Maintained position supporting {session.user_side} across exchanges."
                             rubric_gram = "Communicated ideas with intelligible sentence structure under pressure."
                             rubric_vocab = "Used appropriate vocabulary for this debate topic."
-                            rubric_deliv = "Spoke with understandable pacing across turns."
-                            strongest_mom = f"Defended your stance directly supporting {session.user_side}."
-                            improve_opp = "Introduce supporting evidence earlier in your response."
+                            rubric_deliv = "Spoke with understandable pacing across turns." if evidence_assessment.has_sufficient_delivery_evidence else "No audio recording available to evaluate spoken delivery."
+                            strongest_mom = None
+                            improve_opp = "Review evaluation service unavailable. Try another debate session."
 
-                    lang_feedback = None
-                    if patch_res:
-                        pron_list = [
-                            PronunciationPatternSchema(
-                                sound=p.sound,
-                                heardIn=p.heard_in,
-                                note=p.note,
-                                occurrences=p.occurrences,
-                                severity=p.severity,
-                            )
-                            for p in patch_res.pronunciation_findings
-                            if p.reportable
-                        ]
+                        lang_feedback = None
+                        if patch_res:
+                            pron_list = [
+                                PronunciationPatternSchema(
+                                    sound=p.sound,
+                                    heardIn=p.heard_in,
+                                    note=p.note,
+                                    occurrences=p.occurrences,
+                                    severity=p.severity,
+                                )
+                                for p in patch_res.pronunciation_findings
+                                if p.reportable
+                            ]
 
-                        lang_feedback = {
-                            "pronunciation": [p.model_dump() for p in pron_list] if pron_list else [],
-                            "fluency": patch_res.fluency_finding.model_dump() if patch_res.fluency_finding else None,
-                            "grammar": patch_res.grammar_finding.model_dump() if patch_res.grammar_finding else None,
-                            "vocabulary": patch_res.vocabulary_finding.model_dump() if patch_res.vocabulary_finding else None,
-                            "clarity": patch_res.clarity_finding.model_dump() if patch_res.clarity_finding else None,
-                        }
-
-                    xp_earned = 100 + (final_stars * 20)
+                            lang_feedback = {
+                                "pronunciation": [p.model_dump() for p in pron_list] if pron_list else [],
+                                "fluency": patch_res.fluency_finding.model_dump() if patch_res.fluency_finding else None,
+                                "grammar": patch_res.grammar_finding.model_dump() if patch_res.grammar_finding else None,
+                                "vocabulary": patch_res.vocabulary_finding.model_dump() if patch_res.vocabulary_finding else None,
+                                "clarity": patch_res.clarity_finding.model_dump() if patch_res.clarity_finding else None,
+                            }
 
                     # Record completion & star progression (respecting onboarding placement vs regular debate)
                     await prog_repo.record_debate_completion(
@@ -710,7 +736,7 @@ class DebateOrchestrator:
                         stars_earned=final_stars,
                         xp_earned=xp_earned,
                         outcome=outcome,
-                        streak_extended=True,
+                        streak_extended=streak_extended,
                         is_onboarding=session.is_onboarding,
                         session_id=session_id,
                     )
@@ -724,7 +750,7 @@ class DebateOrchestrator:
                         session_id=session_id,
                     )
 
-                    # Update compact persistent speech profile
+                    # Update compact persistent speech profile if language patch returned findings
                     if patch_res:
                         profile_update = {
                             "last_updated": datetime.date.today().isoformat(),
@@ -741,15 +767,15 @@ class DebateOrchestrator:
                         user_id=user_id,
                         outcome=outcome,
                         stars=final_stars,
-                        completed=True,
+                        completed=(final_stars > 0 or outcome in ("user_win", "opponent_win", "draw")),
                         skill_demonstrated=skill_demo,
                         mastery_note=reviewer_res.mastery_note if reviewer_res else None,
                         skill_assessment=skill_assessment,
                         argument_feedback=arg_feedback,
                         language_feedback=lang_feedback,
                         xp_earned=xp_earned,
-                        streak_extended=True,
-                        next_level_unlocked=(final_stars >= 1),
+                        streak_extended=streak_extended,
+                        next_level_unlocked=next_level_unlocked,
                         score_technique=score_tech,
                         score_grammar=score_gram,
                         score_vocabulary=score_vocab,
@@ -773,6 +799,7 @@ class DebateOrchestrator:
                     "user_side": session.user_side,
                     "outcome": outcome,
                     "stars": final_stars,
+                    "has_sufficient_evidence": evidence_assessment.has_sufficient_evidence,
                     "score_technique": score_tech,
                     "score_grammar": score_gram,
                     "score_vocabulary": score_vocab,
@@ -784,6 +811,7 @@ class DebateOrchestrator:
                     "rubric_vocabulary": rubric_vocab,
                     "rubric_delivery": rubric_deliv,
                     "language_feedback": lang_feedback,
+                    "transcript": full_transcript,
                 }
                 await CoachEngine.update_coach_memory_after_debate(db, user_id, debate_summary)
 
@@ -842,6 +870,38 @@ class DebateOrchestrator:
     ) -> DebateReviewSchema:
         lang_feedback = encryptor.decrypt_json(r.language_feedback_encrypted) if r.language_feedback_encrypted else None
 
+        score_tech_schema = None
+        if r.score_technique is not None or r.score_technique_rubric:
+            score_tech_schema = ScoreWithRubricSchema(
+                score=r.score_technique,
+                label="Debate technique",
+                rubric=r.score_technique_rubric or "Directly addressed opposing claims with clear argumentative logic.",
+            )
+
+        score_gram_schema = None
+        if r.score_grammar is not None or r.score_grammar_rubric:
+            score_gram_schema = ScoreWithRubricSchema(
+                score=r.score_grammar,
+                label="Grammar",
+                rubric=r.score_grammar_rubric or "Clean sentence structures with minimal syntactic friction under pressure.",
+            )
+
+        score_vocab_schema = None
+        if r.score_vocabulary is not None or r.score_vocabulary_rubric:
+            score_vocab_schema = ScoreWithRubricSchema(
+                score=r.score_vocabulary,
+                label="Vocabulary",
+                rubric=r.score_vocabulary_rubric or "Appropriate and precise word choices tailored to the topic.",
+            )
+
+        score_deliv_schema = None
+        if r.score_delivery is not None or r.score_delivery_rubric:
+            score_deliv_schema = ScoreWithRubricSchema(
+                score=r.score_delivery,
+                label="Delivery",
+                rubric=r.score_delivery_rubric or "Consistent pacing with natural pauses between points.",
+            )
+
         return DebateReviewSchema(
             sessionId=session_id,
             outcome=r.outcome,
@@ -859,26 +919,10 @@ class DebateOrchestrator:
             nextLevelUnlocked=r.next_level_unlocked,
             topic=topic,
             skillName=skill_name,
-            scoreTechnique=ScoreWithRubricSchema(
-                score=r.score_technique or 8,
-                label="Debate technique",
-                rubric=r.score_technique_rubric or "Directly addressed opposing claims with clear argumentative logic.",
-            ),
-            scoreGrammar=ScoreWithRubricSchema(
-                score=r.score_grammar or 8,
-                label="Grammar",
-                rubric=r.score_grammar_rubric or "Clean sentence structures with minimal syntactic friction under pressure.",
-            ),
-            scoreVocabulary=ScoreWithRubricSchema(
-                score=r.score_vocabulary or 8,
-                label="Vocabulary",
-                rubric=r.score_vocabulary_rubric or "Appropriate and precise word choices tailored to the topic.",
-            ),
-            scoreDelivery=ScoreWithRubricSchema(
-                score=r.score_delivery or 8,
-                label="Delivery",
-                rubric=r.score_delivery_rubric or "Consistent pacing with natural pauses between points.",
-            ),
-            strongestMoment=r.strongest_moment or "Your direct refutation held firm under pressure.",
-            improvementOpportunity=r.improvement_opportunity or "Introduce your main supporting evidence earlier in the turn.",
+            scoreTechnique=score_tech_schema,
+            scoreGrammar=score_gram_schema,
+            scoreVocabulary=score_vocab_schema,
+            scoreDelivery=score_deliv_schema,
+            strongestMoment=r.strongest_moment,
+            improvementOpportunity=r.improvement_opportunity,
         )

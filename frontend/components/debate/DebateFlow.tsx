@@ -267,14 +267,14 @@ export function DebateFlow({
           onFinish(review);
         } catch (err) {
           logger.warn("debate_flow.review_fetch_failed_using_fallback", { sessionId: sessionRef.current.id });
-          // review unavailable — debate still counts as completed
+          // review unavailable — honest undetermined review
           onFinish({
             outcome: "undetermined",
             topic: sessionRef.current.topic,
             skillName: sessionRef.current.skillTarget.name,
-            stars: { stars: 1, completed: true, skillDemonstrated: false },
-            xpEarned: 60,
-            streakExtended: true,
+            stars: { stars: 0, completed: false, skillDemonstrated: false },
+            xpEarned: 0,
+            streakExtended: false,
           });
         }
       } else {

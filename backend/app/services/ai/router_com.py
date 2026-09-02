@@ -54,6 +54,7 @@ class RouterComClient:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         response_format_json: bool = False,
+        reasoning_effort: Optional[str] = None,
     ) -> AICompletionResult:
         if not self.is_configured:
             raise ValueError("Router.com API key not configured")
@@ -64,9 +65,15 @@ class RouterComClient:
         payload: Dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "temperature": temperature,
             "max_tokens": max_tokens,
         }
+
+        # Models like gpt-5.6-luna and OpenAI reasoning models reject custom temperature on Router.com (HTTP 400)
+        if temperature is not None and not any(k in model.lower() for k in ["luna", "o1", "o3", "o4"]):
+            payload["temperature"] = temperature
+
+        if reasoning_effort and reasoning_effort.strip():
+            payload["reasoning_effort"] = reasoning_effort.strip().lower()
 
         if response_format_json:
             payload["response_format"] = {"type": "json_object"}
@@ -83,7 +90,16 @@ class RouterComClient:
                 raise ValueError("Router.com returned empty choices")
 
             first_choice = choices[0]
-            content = first_choice.get("message", {}).get("content", "").strip()
+            choice_msg = first_choice.get("message", {})
+            raw_content = choice_msg.get("content", "") or ""
+            reasoning_text = choice_msg.get("reasoning") or choice_msg.get("reasoning_content")
+
+            import re
+            extracted_thinks = re.findall(r"<think>([\s\S]*?)</think>", raw_content)
+            if extracted_thinks and not reasoning_text:
+                reasoning_text = "\n".join(extracted_thinks).strip()
+
+            content = re.sub(r"<think>[\s\S]*?(?:</think>|$)", "", raw_content).strip()
             finish_reason = first_choice.get("finish_reason")
 
             usage = res_json.get("usage", {})
@@ -94,6 +110,7 @@ class RouterComClient:
 
             return AICompletionResult(
                 content=content,
+                reasoning=reasoning_text,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 provider_request_id=provider_req_id,
@@ -109,6 +126,7 @@ class RouterComClient:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         response_format_json: bool = False,
+        reasoning_effort: Optional[str] = None,
     ) -> str:
         res = await self.chat_completion_raw(
             messages=messages,
@@ -116,8 +134,10 @@ class RouterComClient:
             temperature=temperature,
             max_tokens=max_tokens,
             response_format_json=response_format_json,
+            reasoning_effort=reasoning_effort,
         )
         return res.content
 
 
 router_com_client = RouterComClient()
+

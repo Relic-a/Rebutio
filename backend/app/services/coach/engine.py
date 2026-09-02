@@ -200,39 +200,79 @@ class CoachEngine:
             transcript = []
             for t in session.turns:
                 txt = encryptor.decrypt_str(t.text_encrypted) if t.text_encrypted else ""
-                transcript.append({"speaker": t.speaker, "turn_number": t.turn_number, "text": txt})
+                transcript.append({
+                    "speaker": t.speaker,
+                    "turn_number": t.turn_number,
+                    "text": txt,
+                    "audio_available": getattr(t, "audio_available", False),
+                    "duration_sec": getattr(t, "duration_sec", 0.0),
+                })
 
+            from backend.app.domain.evidence import assess_debate_evidence
+            ev_assessment = assess_debate_evidence(transcript)
             opp_side = "disagree" if session.user_side == "agree" else "agree"
 
-            review_dict = {
-                "outcome": review.outcome if review else "undetermined",
-                "stars": review.stars if review else 1,
-                "technique": review.score_technique if review else 8,
-                "grammar": review.score_grammar if review else 8,
-                "vocabulary": review.score_vocabulary if review else 8,
-                "delivery": review.score_delivery if review else 8,
-                "strongest_moment": review.strongest_moment if review else "Your direct refutation held strong under pressure.",
-                "improvement_opportunity": review.improvement_opportunity if review else "State your main claim earlier in the turn.",
-                "language_feedback": encryptor.decrypt_json(review.language_feedback_encrypted) if review and review.language_feedback_encrypted else {},
-            }
+            if not ev_assessment.has_sufficient_evidence:
+                opening_res = CoachOpeningAnalysisResult(
+                    overall_assessment="There was not enough substantive speech in this debate session to evaluate your spoken English.",
+                    most_important_strength="You initiated the session.",
+                    highest_value_improvement="In your next debate, speak in at least two complete turns with a clear reason and an example.",
+                    concrete_example=transcript[0]["text"] if transcript else None,
+                    evidence_turn_number=1,
+                    suggested_quick_replies=[
+                        "How do I structure a spoken response?",
+                        "What should I practice next?",
+                        "Give me a 1-minute practice drill",
+                    ],
+                )
+            else:
+                review_dict = {
+                    "outcome": review.outcome if review else "undetermined",
+                    "stars": review.stars if review else 0,
+                    "technique": review.score_technique if review else 8,
+                    "grammar": review.score_grammar if review else 8,
+                    "vocabulary": review.score_vocabulary if review else 8,
+                    "delivery": review.score_delivery if review else 8,
+                    "strongest_moment": review.strongest_moment if review else "Your speech stayed understandable across the exchange.",
+                    "improvement_opportunity": review.improvement_opportunity if review else "Use shorter sentences so each spoken idea lands clearly.",
+                    "language_feedback": encryptor.decrypt_json(review.language_feedback_encrypted) if review and review.language_feedback_encrypted else {},
+                    "has_sufficient_evidence": True,
+                }
 
-            prompt_messages = build_coach_opening_prompt(
-                topic=session.topic_text,
-                user_side=session.user_side,
-                opponent_side=opp_side,
-                skill_name=session.skill_name,
-                difficulty=session.difficulty,
-                transcript=transcript,
-                review=review_dict,
-                coach_memory_markdown=memory_md,
-            )
+                prompt_messages = build_coach_opening_prompt(
+                    topic=session.topic_text,
+                    user_side=session.user_side,
+                    opponent_side=opp_side,
+                    skill_name=session.skill_name,
+                    difficulty=session.difficulty,
+                    transcript=transcript,
+                    review=review_dict,
+                    coach_memory_markdown=memory_md,
+                )
 
-            try:
-                opening_res = await ai_gateway._execute_structured_completion(
-                    role=ModelRole.LANGUAGE_ANALYSIS,
-                    messages=prompt_messages,
-                    schema_cls=CoachOpeningAnalysisResult,
-                    fallback_factory=lambda: CoachOpeningAnalysisResult(
+                try:
+                    opening_res = await ai_gateway._execute_structured_completion(
+                        role=ModelRole.LANGUAGE_ANALYSIS,
+                        messages=prompt_messages,
+                        schema_cls=CoachOpeningAnalysisResult,
+                        fallback_factory=lambda: CoachOpeningAnalysisResult(
+                            overall_assessment="Here is the highest-value pattern in your spoken English from this session.",
+                            most_important_strength=review.strongest_moment if review and review.strongest_moment else "Your speech stayed understandable across the exchange.",
+                            highest_value_improvement=review.improvement_opportunity if review and review.improvement_opportunity else "Use shorter sentences so each spoken idea lands clearly.",
+                            concrete_example=transcript[0]["text"] if transcript else "Your opening argument.",
+                            evidence_turn_number=1,
+                            suggested_quick_replies=[
+                                "Show me another example",
+                                "How should I phrase it?",
+                                "Was my grammar a problem?",
+                                "What should I practice?",
+                                "Let me try that again",
+                            ],
+                        ),
+                    )
+                except Exception as e:
+                    logger.warning("coach.opening_analysis.failed_using_fallback", error=str(e))
+                    opening_res = CoachOpeningAnalysisResult(
                         overall_assessment="Here is the highest-value pattern in your spoken English from this session.",
                         most_important_strength=review.strongest_moment if review and review.strongest_moment else "Your speech stayed understandable across the exchange.",
                         highest_value_improvement=review.improvement_opportunity if review and review.improvement_opportunity else "Use shorter sentences so each spoken idea lands clearly.",
@@ -245,24 +285,7 @@ class CoachEngine:
                             "What should I practice?",
                             "Let me try that again",
                         ],
-                    ),
-                )
-            except Exception as e:
-                logger.warning("coach.opening_analysis.failed_using_fallback", error=str(e))
-                opening_res = CoachOpeningAnalysisResult(
-                    overall_assessment="Here is the highest-value pattern in your spoken English from this session.",
-                    most_important_strength=review.strongest_moment if review and review.strongest_moment else "Your speech stayed understandable across the exchange.",
-                    highest_value_improvement=review.improvement_opportunity if review and review.improvement_opportunity else "Use shorter sentences so each spoken idea lands clearly.",
-                    concrete_example=transcript[0]["text"] if transcript else "Your opening argument.",
-                    evidence_turn_number=1,
-                    suggested_quick_replies=[
-                        "Show me another example",
-                        "How should I phrase it?",
-                        "Was my grammar a problem?",
-                        "What should I practice?",
-                        "Let me try that again",
-                    ],
-                )
+                    )
 
             opening_data = {
                 "overall_assessment": opening_res.overall_assessment,
@@ -285,7 +308,7 @@ class CoachEngine:
                 structured_data=opening_data,
             )
 
-            # Check if there is an existing audio media asset from the debate to attach evidence
+            # Only attach derived audio evidence if debate had sufficient audio evidence
             stmt_assets = select(MediaAsset).where(
                 MediaAsset.session_id == session.id,
                 MediaAsset.user_id == user_id,
@@ -293,7 +316,7 @@ class CoachEngine:
             res_assets = await db.execute(stmt_assets)
             user_assets = list(res_assets.scalars().all())
 
-            if user_assets:
+            if ev_assessment.has_sufficient_evidence and ev_assessment.has_sufficient_delivery_evidence and user_assets:
                 target_turn = opening_res.evidence_turn_number or 1
                 target_asset = next((a for a in user_assets if a.turn_number == target_turn), None) or user_assets[0]
                 try:
@@ -369,19 +392,31 @@ class CoachEngine:
         if thread.session:
             sess = thread.session
             review = await DebateSessionRepository(db).get_review(sess.id)
+            turns = await DebateSessionRepository(db).get_turns(sess.id)
+            sess_transcript = []
+            for t in turns:
+                txt = encryptor.decrypt_str(t.text_encrypted) if t.text_encrypted else ""
+                sess_transcript.append({"speaker": t.speaker, "turn_number": t.turn_number, "text": txt})
+
+            from backend.app.domain.evidence import assess_debate_evidence
+            ev_assessment = assess_debate_evidence(sess_transcript)
             opp_side = "disagree" if sess.user_side == "agree" else "agree"
             debate_context = {
                 "topic": sess.topic_text,
                 "user_side": sess.user_side,
                 "opponent_side": opp_side,
                 "skill_name": sess.skill_name,
+                "outcome": review.outcome if review else "undetermined",
+                "stars": review.stars if review else 0,
+                "has_sufficient_evidence": ev_assessment.has_sufficient_evidence,
                 "score_technique": review.score_technique if review else 8,
                 "score_grammar": review.score_grammar if review else 8,
                 "score_vocabulary": review.score_vocabulary if review else 8,
                 "score_delivery": review.score_delivery if review else 8,
-                "strongest_moment": review.strongest_moment if review else "Solid refutation in turn 2.",
-                "improvement_opportunity": review.improvement_opportunity if review else "Lead with your main point earlier.",
+                "strongest_moment": review.strongest_moment if review else "Solid speech during turn 2.",
+                "improvement_opportunity": review.improvement_opportunity if review else "Keep your spoken sentences concise.",
                 "language_feedback": encryptor.decrypt_json(review.language_feedback_encrypted) if review and review.language_feedback_encrypted else {},
+                "transcript": sess_transcript,
             }
 
         memory_md, _ = await coach_repo.get_memory_markdown(user_id)
@@ -417,7 +452,7 @@ class CoachEngine:
             )
 
         coach_resp = await ai_gateway._execute_structured_completion(
-            role=ModelRole.LANGUAGE_ANALYSIS,
+            role=ModelRole.COACH,
             messages=prompt_messages,
             schema_cls=CoachTurnResponse,
             fallback_factory=default_fallback,
@@ -466,7 +501,7 @@ class CoachEngine:
                     updated_messages = list(prompt_messages) + [tool_call_msg, tool_res_msg]
                     try:
                         coach_resp = await ai_gateway._execute_structured_completion(
-                            role=ModelRole.LANGUAGE_ANALYSIS,
+                            role=ModelRole.COACH,
                             messages=updated_messages,
                             schema_cls=CoachTurnResponse,
                             fallback_factory=lambda: coach_resp,

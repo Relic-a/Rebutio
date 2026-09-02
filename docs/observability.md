@@ -69,7 +69,7 @@ This surfaces:
 2. `debate.turn.received` (turn 1 user submission)
 3. `speech.transcription.started` / `speech.transcription.completed` (MAI STT)
 4. `speech.phoneme_processing.dispatched` (Modal CTC phoneme analysis)
-5. `debate.opponent_generation.started` / `debate.opponent_generation.completed` (DeepSeek V4 Pro)
+5. `debate.opponent_generation.started` / `debate.opponent_generation.completed` (GPT-5.6 Luna)
 6. `debate.tts.started` / `debate.tts.completed` (Gemini Flash TTS)
 7. `session.state_changed` (`user_turn_submitted` -> `opponent_thinking` -> `opponent_ready`)
 8. `background_task.started` / `background_task.completed` (evidence saving, topic inventory refill)

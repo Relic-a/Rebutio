@@ -38,8 +38,10 @@ T = TypeVar("T", bound=BaseModel)
 
 
 def clean_json_string(raw: str) -> str:
-    """Strips markdown code blocks, backticks, and extraneous prefixes/suffixes."""
+    """Strips thinking tags, markdown code blocks, backticks, and extraneous prefixes/suffixes."""
     raw = raw.strip()
+    # Strip <think>...</think> if model output thought tokens inside response
+    raw = re.sub(r"<think>[\s\S]*?(?:</think>|$)", "", raw).strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
         raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
@@ -205,7 +207,7 @@ class AIGateway:
 
     async def generate_debate_response(self, messages: List[dict], current_turn: int = 1) -> str:
         """
-        Generates Rebutio's next spoken debate argument using DeepSeek V4 Pro / configured LLM.
+        Generates Rebutio's next spoken debate argument using GPT-5.6 Luna / configured LLM.
         Output is checked for prompt/instruction leakage before delivery.
         Returns normal spoken text string without classification schemas.
         """
@@ -264,6 +266,7 @@ class AIGateway:
                         model=cand.model_id,
                         temperature=cand.temperature,
                         max_tokens=cand.max_tokens,
+                        reasoning_effort=cand.reasoning_effort,
                     )
                 elif cand.provider == ProviderType.OPENROUTER and self.openrouter.is_configured:
                     raw_res = await self.openrouter.chat_completion_raw(
@@ -271,6 +274,7 @@ class AIGateway:
                         model=cand.model_id,
                         temperature=cand.temperature,
                         max_tokens=cand.max_tokens,
+                        reasoning_effort=cand.reasoning_effort,
                     )
 
                 if raw_res and raw_res.content:
@@ -379,7 +383,9 @@ class AIGateway:
         return mock_responses[(current_turn - 1) % len(mock_responses)]
 
     def _clean_opponent_text(self, text: str) -> str:
-        cleaned = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
+        # Strip thinking tags from model output
+        cleaned = re.sub(r"<think>[\s\S]*?(?:</think>|$)", "", text).strip()
+        cleaned = re.sub(r"^#+\s*", "", cleaned, flags=re.MULTILINE)
         cleaned = re.sub(r"^\s*[-*•]\s*", "", cleaned, flags=re.MULTILINE)
         cleaned = re.sub(r"^(?:Rebutio(?:\s+responds)?|Opponent|Assistant|AI)\s*:\s*", "", cleaned, flags=re.IGNORECASE | re.MULTILINE)
         cleaned = re.sub(r"^Rebutio\s+responds\s*", "", cleaned, flags=re.IGNORECASE | re.MULTILINE)
@@ -448,6 +454,7 @@ class AIGateway:
                         temperature=cand.temperature,
                         max_tokens=cand.max_tokens,
                         response_format_json=True,
+                        reasoning_effort=cand.reasoning_effort,
                     )
                 elif cand.provider == ProviderType.OPENROUTER and self.openrouter.is_configured:
                     raw_res = await self.openrouter.chat_completion_raw(
@@ -456,6 +463,7 @@ class AIGateway:
                         temperature=cand.temperature,
                         max_tokens=cand.max_tokens,
                         response_format_json=True,
+                        reasoning_effort=cand.reasoning_effort,
                     )
 
                 if raw_res and raw_res.content:
@@ -494,7 +502,7 @@ class AIGateway:
                             parse_error=str(parse_err),
                             attempting_repair=True,
                         )
-                        # 1 constrained repair retry
+                        # 1 constrained repair retry with no reasoning
                         repair_prompt = [
                             {"role": "system", "content": "You are a JSON repair tool. Output only the valid JSON object conforming to the required schema, with no markdown or explanation."},
                             {"role": "user", "content": f"Fix this invalid JSON to match the expected format:\n{raw_text}"}
@@ -512,8 +520,9 @@ class AIGateway:
                                 messages=repair_prompt,
                                 model=cand.model_id,
                                 temperature=0.0,
-                                max_tokens=cand.max_tokens,
+                                max_tokens=2048,
                                 response_format_json=True,
+                                reasoning_effort="none",
                             )
                             cleaned_rep = clean_json_string(rep_res.content)
                             validated_obj = schema_cls.model_validate(json.loads(cleaned_rep))
@@ -677,12 +686,22 @@ class AIGateway:
             return DebateReviewerResult(
                 outcome="undetermined",
                 target_skill_demonstrated=False,
-                mastery_stars=1,
-                mastery_note="Completed the debate turns.",
-                skill_summary="Completed all turns under the target skill focus.",
-                argument_strength="You articulated your position clearly across all turns.",
-                argument_improvement="Continue pressing on core opposing assumptions in future debates.",
+                mastery_stars=0,
+                mastery_note="Review evaluation was unavailable.",
+                skill_summary="Debate review could not be completed by the evaluation service.",
+                argument_strength="Detailed argument evaluation unavailable.",
+                argument_improvement="Try another debate exchange to receive targeted feedback.",
                 strategic_insight=None,
+                score_technique=None,
+                score_grammar=None,
+                score_vocabulary=None,
+                score_delivery=None,
+                score_technique_rubric=None,
+                score_grammar_rubric=None,
+                score_vocabulary_rubric=None,
+                score_delivery_rubric=None,
+                strongest_moment=None,
+                improvement_opportunity=None,
             )
 
         return await self._execute_structured_completion(
@@ -703,7 +722,7 @@ class AIGateway:
         Updates the canonical Markdown coaching memory document using Luna/configured analysis model.
         If AI fails or is unconfigured, creates a clean structured fallback appending the latest debate findings.
         """
-        role = ModelRole.LANGUAGE_ANALYSIS
+        role = ModelRole.COACH
         candidates = get_role_candidates(role)
         for cand in candidates:
             try:
@@ -714,6 +733,7 @@ class AIGateway:
                         model=cand.model_id,
                         temperature=0.2,
                         max_tokens=cand.max_tokens,
+                        reasoning_effort=cand.reasoning_effort,
                     )
                 elif cand.provider == ProviderType.OPENROUTER and self.openrouter.is_configured:
                     raw_res = await self.openrouter.chat_completion_raw(
@@ -721,6 +741,7 @@ class AIGateway:
                         model=cand.model_id,
                         temperature=0.2,
                         max_tokens=cand.max_tokens,
+                        reasoning_effort=cand.reasoning_effort,
                     )
                 if raw_res and raw_res.content:
                     cleaned = clean_json_string(raw_res.content).strip()

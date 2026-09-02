@@ -61,14 +61,14 @@ export type DebateSetup = {
 };
 
 export type ScoreWithRubric = {
-  score: number;
+  score?: number | null;
   label: string;
   rubric: string;
 };
 
 /** Review contract — every field is defensive; treat as possibly absent. */
 export type StarAssessment = {
-  stars: 1 | 2 | 3;
+  stars: 0 | 1 | 2 | 3;
   completed: boolean;
   skillDemonstrated: boolean;
   masteryNote?: string;

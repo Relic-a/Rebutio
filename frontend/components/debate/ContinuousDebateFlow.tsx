@@ -68,6 +68,7 @@ export function ContinuousDebateFlow({
   const [elapsedDebateTime, setElapsedDebateTime] = useState(0);
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
+  const [finishError, setFinishError] = useState<string | null>(null);
 
   const turnsScrollRef = useRef<HTMLDivElement | null>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
@@ -77,14 +78,35 @@ export function ContinuousDebateFlow({
 
   const handleConfirmFinish = async () => {
     setIsFinishing(true);
+    setFinishError(null);
+    let stage: "finish" | "review" = "finish";
     try {
       await appService.finishDebate(session);
+      stage = "review";
       const review = await appService.getDebateReview(session.id);
       onFinish(review);
     } catch (err) {
-      logger.error("debate.finish_failed", { error: String(err) });
+      const apiError = err as Error & { requestId?: string; status?: number };
+      const logContext = {
+        sessionId: session.id,
+        stage,
+        status: apiError?.status,
+        requestId: apiError?.requestId,
+      };
+      if (typeof apiError?.status === "number" && apiError.status < 500) {
+        logger.warn("debate.finish_rejected", {
+          ...logContext,
+          error: { name: apiError.name, message: apiError.message },
+        });
+      } else {
+        logger.error("debate.finish_failed", logContext, err);
+      }
+      setFinishError(
+        stage === "finish"
+          ? "We couldn't finish this debate. Please try again."
+          : "The debate finished, but the review isn't ready yet. Please try again.",
+      );
       setIsFinishing(false);
-      setShowFinishModal(false);
     }
   };
 
@@ -290,21 +312,21 @@ export function ContinuousDebateFlow({
           onFinish(review);
         } catch (revErr) {
           logger.error("debate.review_fetch_failed", { sessionId: session.id }, revErr);
-          // Fallback minimal review
+          // Fallback honest unrated review
           onFinish({
             sessionId: session.id,
-            outcome: "user_win",
-            stars: { stars: 2, completed: true, skillDemonstrated: true, masteryNote: "Completed all debate rounds." },
-            xpEarned: 120,
-            streakExtended: true,
+            outcome: "undetermined",
+            stars: { stars: 0, completed: false, skillDemonstrated: false, masteryNote: "Review unavailable." },
+            xpEarned: 0,
+            streakExtended: false,
             topic: session.topic,
             skillName: session.skillTarget.name,
-            scoreTechnique: { score: 8, label: "Debate Technique", rubric: "Directly challenged the opponent's core premise." },
-            scoreGrammar: { score: 8, label: "Grammar & Accuracy", rubric: "Clean sentence structures without major breakdowns." },
-            scoreVocabulary: { score: 8, label: "Vocabulary & Precision", rubric: "Persuasive and appropriate terminology." },
-            scoreDelivery: { score: 8, label: "Delivery & Clarity", rubric: "Clear and confident pacing under conversational pressure." },
-            strongestMoment: "Strongest moment in turn 2 when pressing the counterpoint.",
-            improvementOpportunity: "Lead with your main thesis before elaborating on sub-points.",
+            scoreTechnique: { score: null, label: "Debate Technique", rubric: "Review evaluation unavailable." },
+            scoreGrammar: { score: null, label: "Grammar & Accuracy", rubric: "Review evaluation unavailable." },
+            scoreVocabulary: { score: null, label: "Vocabulary & Precision", rubric: "Review evaluation unavailable." },
+            scoreDelivery: { score: null, label: "Delivery & Clarity", rubric: "Review evaluation unavailable." },
+            strongestMoment: undefined,
+            improvementOpportunity: "Review evaluation service was temporarily unavailable.",
           });
         }
       } else {
@@ -622,6 +644,12 @@ export function ContinuousDebateFlow({
               <p className="mt-3 text-xs text-ink leading-relaxed">
                 Are you ready to wrap up this debate on <span className="font-semibold text-ink">&ldquo;{session.topic}&rdquo;</span> and proceed to your full performance review?
               </p>
+
+              {finishError && (
+                <p role="alert" className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+                  {finishError}
+                </p>
+              )}
 
               <div className="mt-5 flex gap-2 justify-end">
                 <button

@@ -34,15 +34,36 @@ export const insforge = createClient({
   anonKey: process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY || "anon_5042180029b5d24c41a999b3b07eabd76b6f740aa6749b5358bd95e4d6fe42b5",
 });
 
+let authHydrationPromise: Promise<void> | null = null;
+
+async function hydrateBrowserAuth(): Promise<void> {
+  if (typeof window === "undefined") return;
+
+  if (!authHydrationPromise) {
+    authHydrationPromise = insforge.auth.getCurrentUser().then(() => undefined);
+  }
+
+  const pendingHydration = authHydrationPromise;
+  try {
+    await pendingHydration;
+  } finally {
+    if (authHydrationPromise === pendingHydration) {
+      authHydrationPromise = null;
+    }
+  }
+}
+
 export async function getValidAccessToken(): Promise<string | null> {
   try {
-    const token = await insforge.getHttpClient().getValidAccessToken();
+    const httpClient = insforge.getHttpClient();
+    let token = await httpClient.getValidAccessToken();
     if (token) return token;
-    const clientHeaders = insforge.getHttpClient().getHeaders();
-    const auth = clientHeaders["Authorization"] || clientHeaders["authorization"];
-    if (auth && auth.toLowerCase().startsWith("bearer ")) {
-      return auth.slice(7).trim();
-    }
+
+    // The browser SDK keeps access tokens in memory. On a cold load,
+    // getCurrentUser() restores that session from the httpOnly refresh cookie.
+    await hydrateBrowserAuth();
+    token = await httpClient.getValidAccessToken();
+    if (token) return token;
   } catch {
     // Non-blocking
   }
@@ -54,11 +75,6 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
     const token = await getValidAccessToken();
     if (token) {
       return { Authorization: `Bearer ${token}` };
-    }
-    // Check if SDK headers already have Authorization set
-    const clientHeaders = insforge.getHttpClient().getHeaders();
-    if (clientHeaders["Authorization"] || clientHeaders["authorization"]) {
-      return { Authorization: clientHeaders["Authorization"] || clientHeaders["authorization"] };
     }
   } catch {
     // Non-blocking
@@ -226,17 +242,25 @@ export function createHttpService(baseUrl: string = ""): AppService {
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
         const errMsg = parseErrorDetail(errText, res.statusText || `Request failed (${res.status})`);
-        logger.error("api.request.failed", { path, status: res.status, requestId: reqId }, new Error(errMsg));
         const error = new Error(errMsg);
         (error as any).requestId = reqId;
         (error as any).status = res.status;
         (error as any).detail = errMsg;
+
+        // 4xx responses are expected request rejections that callers can handle.
+        // Logging them with console.error makes Next.js render a misleading
+        // development error overlay even when the promise is caught.
+        if (res.status >= 500) {
+          logger.error("api.request.failed", { path, status: res.status, requestId: reqId }, error);
+        } else {
+          logger.warn("api.request.rejected", { path, status: res.status, requestId: reqId, detail: errMsg });
+        }
         throw error;
       }
 
       return res.json();
     } catch (e: any) {
-      if (!e.requestId && logger.getRequestId()) {
+      if (e && typeof e === "object" && !e.requestId && logger.getRequestId()) {
         e.requestId = logger.getRequestId();
       }
       throw e;
@@ -398,10 +422,22 @@ export function createHttpService(baseUrl: string = ""): AppService {
     async finishDebate(session) {
       await request(`/api/sessions/${session.id}/finish`, {
         method: "POST",
-      }).catch(() => {});
+      });
     },
 
     async getDebateReview(sessionId) {
+      let attempts = 0;
+      const maxAttempts = 6;
+      while (attempts < maxAttempts) {
+        try {
+          const res = await request<DebateReview>(`/api/sessions/${sessionId}/review`);
+          if (res) return res;
+        } catch (err: any) {
+          attempts++;
+          if (attempts >= maxAttempts) throw err;
+          await new Promise((r) => setTimeout(r, 1200));
+        }
+      }
       return request<DebateReview>(`/api/sessions/${sessionId}/review`);
     },
 

@@ -281,10 +281,13 @@ async def test_recoverable_review_pending_finalization():
         start_resp = await client.post("/api/debates/start", json={"side": "agree", "onboarding": True}, headers=headers)
         session_id = start_resp.json()["session"]["id"]
 
-        # Submit Turn 1
+        # Submit Turn 1 with substantive argument
         await client.post(
             f"/api/sessions/{session_id}/turns",
-            data={"transcript": "I believe this topic is crucial.", "turn_index": 1},
+            data={
+                "transcript": "I strongly believe that algorithmic recommendation systems inherently polarize public discourse by optimizing for outrage rather than promoting constructive and nuanced democratic deliberation across society.",
+                "turn_index": 1,
+            },
             headers=headers,
         )
 

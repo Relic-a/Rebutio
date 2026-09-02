@@ -46,11 +46,13 @@ def mock_all_external_ai_services(monkeypatch):
     monkeypatch.setattr(openrouter_client, "api_key", "test-mock-openrouter-key")
     monkeypatch.setattr(ai_gateway.openrouter, "api_key", "test-mock-openrouter-key")
 
-    async def mock_openrouter_chat_raw(messages, model, temperature=0.7, max_tokens=1024, response_format_json=False):
+    async def mock_openrouter_chat_raw(messages, model, temperature=0.7, max_tokens=1024, response_format_json=False, reasoning_effort=None, **kwargs):
         # Infer role/type from messages
         first_content = messages[0]["content"] if messages else ""
         
-        if "LANGUAGE ANALYSIS ENGINE" in first_content or "FINAL PATCH" in first_content:
+        content_lower = first_content.lower()
+        
+        if "speech and language" in content_lower or "language analysis" in content_lower or "final patch" in content_lower or "speech-and-language" in content_lower:
             sample_analysis = MainLanguageAnalysisResult(
                 pronunciation_findings=[],
                 fluency_finding=StructuredFluencyFinding(
@@ -79,7 +81,7 @@ def mock_all_external_ai_services(monkeypatch):
             )
             content = sample_analysis.model_dump_json()
 
-        elif "INDEPENDENT DEBATE REVIEWER" in first_content:
+        elif "debate adjudicator" in content_lower or "debate reviewer" in content_lower or "independent debate reviewer" in content_lower:
             sample_review = DebateReviewerResult(
                 outcome="user_win",
                 target_skill_demonstrated=True,
@@ -92,7 +94,7 @@ def mock_all_external_ai_services(monkeypatch):
             )
             content = sample_review.model_dump_json()
 
-        elif "TOPIC GENERATOR" in first_content:
+        elif "topic generator" in content_lower or "generate debate motions" in content_lower:
             sample_topics = GeneratedTopicsResponse(
                 topics=[
                     {
@@ -106,7 +108,7 @@ def mock_all_external_ai_services(monkeypatch):
             )
             content = sample_topics.model_dump_json()
 
-        elif "memory curator for Rebutio Coach" in first_content or "COACH MEMORY" in first_content:
+        elif "coaching memory" in content_lower or "coach memory" in content_lower or "curate rebutio coach" in content_lower or "memory curator" in content_lower:
             sample_memory = """# Rebutio Coach Memory
 
 ## User Preferences & Goals

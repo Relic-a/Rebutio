@@ -31,12 +31,11 @@ dev = [
     "pytest-cov>=5.0.0",
 ]
 
-[tool.setuptools.package-dir]
-"backend.app" = "app"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["app*"]
+where = [".."]
+include = ["backend*"]
+exclude = ["frontend*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

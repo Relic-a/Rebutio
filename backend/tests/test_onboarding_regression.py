@@ -190,26 +190,20 @@ def test_build_opponent_prompt_multi_turn_attribution():
 
     # 2. History turns properly attributed
     assert messages[1]["role"] == "user"
-    assert "[User Turn 1 | Defending: AGREE]" in messages[1]["content"]
-    assert "College wastes time and money." in messages[1]["content"]
+    assert messages[1]["content"] == "College wastes time and money."
 
     assert messages[2]["role"] == "assistant"
-    assert "[Rebutio Turn 1 | Defending: DISAGREE]" in messages[2]["content"]
-    assert "College builds networks and credentials." in messages[2]["content"]
+    assert messages[2]["content"] == "College builds networks and credentials."
 
     assert messages[3]["role"] == "user"
-    assert "[User Turn 2 | Defending: AGREE]" in messages[3]["content"]
+    assert messages[3]["content"] == "A portfolio in software or marketing proves the work better."
 
     assert messages[4]["role"] == "assistant"
-    assert "[Rebutio Turn 2 | Defending: DISAGREE]" in messages[4]["content"]
+    assert messages[4]["content"] == "Average graduates outearn non-graduates over a lifetime."
 
-    # 3. Latest active user turn contains the question and strict debate directive
+    # 3. Latest active user turn contains the question
     assert messages[5]["role"] == "user"
-    assert "[User Turn 3 | Defending: AGREE]" in messages[5]["content"]
-    assert "What kind of non-graduates are you talking about?" in messages[5]["content"]
-    assert "[Debate Directive for Rebutio Turn 3]" in messages[5]["content"]
-    assert "Your Assigned Side: DISAGREE" in messages[5]["content"]
-    assert "answer it directly from your assigned position (DISAGREE)" in messages[5]["content"]
+    assert messages[5]["content"] == "What kind of non-graduates are you talking about?"
 
 
 @pytest.mark.asyncio
@@ -269,6 +263,6 @@ async def test_multi_turn_spar_history_propagation_e2e():
         t2_msgs = captured_prompt_messages[1]["messages"]
         assert len(t2_msgs) == 4  # system + u1 + opp1 + u2
         assert "College wastes time and money." in t2_msgs[1]["content"]
-        assert "[Rebutio Turn 1 | Defending: DISAGREE]" in t2_msgs[2]["content"]
+        assert t2_msgs[2]["role"] == "assistant"
         assert "Proof and credentials can be gotten via portfolio faster." in t2_msgs[3]["content"]
 

@@ -48,18 +48,20 @@ class Settings(BaseSettings):
 
     # OpenRouter Role Models (defaults from architecture contract)
     OPENROUTER_TRANSCRIPTION_MODEL: str = "microsoft/mai-transcribe-1.5"
-    OPENROUTER_DEBATE_MODEL: str = "deepseek/deepseek-v4-pro-0813"
+    OPENROUTER_DEBATE_MODEL: str = "openai/gpt-5.6-luna"
     OPENROUTER_TTS_MODEL: str = "deepgram/flux-tts:free"
-    OPENROUTER_ANALYSIS_MODEL: str = "openai/gpt-5.6-luna-pro"
-    OPENROUTER_FINAL_PATCH_MODEL: str = "openai/gpt-5.6-luna-pro"
-    OPENROUTER_REVIEW_MODEL: str = "openai/gpt-5.6-luna-pro"
-    OPENROUTER_TOPIC_MODEL: str = "deepseek/deepseek-v4-flash-0731"
+    OPENROUTER_ANALYSIS_MODEL: str = "openai/gpt-5.6-luna"
+    OPENROUTER_FINAL_PATCH_MODEL: str = "openai/gpt-5.6-luna"
+    OPENROUTER_REVIEW_MODEL: str = "openai/gpt-5.6-luna"
+    OPENROUTER_TOPIC_MODEL: str = "openai/gpt-5.6-luna"
+    OPENROUTER_COACH_MODEL: str = "openai/gpt-5.6-luna"
 
-    # Router.com / Ramp Router Models (optional per role)
-    ROUTER_DEBATE_MODEL: Optional[str] = None
-    ROUTER_ANALYSIS_MODEL: Optional[str] = None
-    ROUTER_REVIEW_MODEL: Optional[str] = None
-    ROUTER_TOPIC_MODEL: Optional[str] = None
+    # Router.com / Ramp Router Models (primary active per role)
+    ROUTER_DEBATE_MODEL: Optional[str] = "gpt-5.6-luna"
+    ROUTER_ANALYSIS_MODEL: Optional[str] = "gpt-5.6-luna"
+    ROUTER_REVIEW_MODEL: Optional[str] = "gpt-5.6-luna"
+    ROUTER_TOPIC_MODEL: Optional[str] = "gpt-5.6-luna"
+    ROUTER_COACH_MODEL: Optional[str] = "gpt-5.6-luna"
 
     # Opponent Voice (optional, model-dependent)
     REBUTIO_TTS_VOICE: Optional[str] = "flux-jack-en"

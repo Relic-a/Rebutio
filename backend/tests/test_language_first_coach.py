@@ -95,6 +95,32 @@ async def test_coach_opening_analysis_language_first_context():
             total_user_turns=4,
         )
 
+        # Add turns so evidence assessment passes
+        await session_repo.save_turn(
+            session_id=session.id,
+            turn_number=1,
+            speaker="user",
+            text="I argue that a universal basic income is essential because it secures economic stability for every citizen in this changing economy.",
+            audio_available=True,
+            duration_sec=7.0,
+        )
+        await session_repo.save_turn(
+            session_id=session.id,
+            turn_number=2,
+            speaker="opponent",
+            text="However, universal payments may induce severe inflation across basic consumer goods.",
+            audio_available=False,
+            duration_sec=6.0,
+        )
+        await session_repo.save_turn(
+            session_id=session.id,
+            turn_number=3,
+            speaker="user",
+            text="Furthermore, automated industries make social safety nets increasingly critical for future generations.",
+            audio_available=True,
+            duration_sec=6.5,
+        )
+
         # Save review with language feedback
         review = DebateReview(
             session_id=session.id,

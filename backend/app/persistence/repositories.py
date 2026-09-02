@@ -207,13 +207,14 @@ class ProgressRepository:
 
         prog.xp += xp_earned
         prog.streak_days = new_streak
-        prog.debates_completed += 1
+        if stars_earned > 0 or outcome in ("user_win", "opponent_win", "draw"):
+            prog.debates_completed += 1
         prog.wins = new_wins
         prog.losses = new_losses
         prog.draws = new_draws
         prog.last_activity_date = datetime.date.today().isoformat()
 
-        if not is_onboarding:
+        if not is_onboarding and stars_earned > 0:
             stars_map = dict(prog.stars_by_node_json or {})
             prev_stars = stars_map.get(skill_id, 0)
             stars_map[skill_id] = max(prev_stars, stars_earned)
@@ -529,13 +530,13 @@ class DebateSessionRepository:
         skill_assessment: Optional[dict] = None,
         argument_feedback: Optional[dict] = None,
         language_feedback: Optional[dict] = None,
-        xp_earned: int = 60,
-        streak_extended: bool = True,
-        next_level_unlocked: bool = True,
-        score_technique: int = 8,
-        score_grammar: int = 8,
-        score_vocabulary: int = 8,
-        score_delivery: int = 8,
+        xp_earned: int = 0,
+        streak_extended: bool = False,
+        next_level_unlocked: bool = False,
+        score_technique: Optional[int] = None,
+        score_grammar: Optional[int] = None,
+        score_vocabulary: Optional[int] = None,
+        score_delivery: Optional[int] = None,
         score_technique_rubric: Optional[str] = None,
         score_grammar_rubric: Optional[str] = None,
         score_vocabulary_rubric: Optional[str] = None,

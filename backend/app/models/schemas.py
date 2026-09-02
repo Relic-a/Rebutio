@@ -150,7 +150,7 @@ class LanguageFeedbackSchema(BaseModel):
 
 
 class StarAssessmentSchema(BaseModel):
-    stars: Literal[1, 2, 3] = 1
+    stars: Literal[0, 1, 2, 3] = 0
     completed: bool = True
     skillDemonstrated: bool = False
     masteryNote: Optional[str] = None
@@ -169,7 +169,7 @@ class ArgumentFeedbackSchema(BaseModel):
 
 
 class ScoreWithRubricSchema(BaseModel):
-    score: int = Field(ge=1, le=10)
+    score: Optional[int] = Field(default=None, ge=0, le=10)
     label: str
     rubric: str
 
@@ -181,43 +181,19 @@ class DebateReviewSchema(BaseModel):
     skillAssessment: Optional[SkillAssessmentSchema] = None
     argumentFeedback: Optional[ArgumentFeedbackSchema] = None
     languageFeedback: Optional[LanguageFeedbackSchema] = None
-    xpEarned: int = 60
+    xpEarned: int = 0
     streakExtended: bool = False
     nextLevelUnlocked: Optional[bool] = None
     topic: str
     skillName: str
 
     # Concise Results 4 Integer Scores out of 10
-    scoreTechnique: ScoreWithRubricSchema = Field(
-        default_factory=lambda: ScoreWithRubricSchema(
-            score=8,
-            label="Debate technique",
-            rubric="Directly addressed opposing claims and provided reasoned counterpoints.",
-        )
-    )
-    scoreGrammar: ScoreWithRubricSchema = Field(
-        default_factory=lambda: ScoreWithRubricSchema(
-            score=8,
-            label="Grammar",
-            rubric="Clean sentence structures with minimal syntactic friction under pressure.",
-        )
-    )
-    scoreVocabulary: ScoreWithRubricSchema = Field(
-        default_factory=lambda: ScoreWithRubricSchema(
-            score=8,
-            label="Vocabulary",
-            rubric="Appropriate and precise word choices tailored to the debate motion.",
-        )
-    )
-    scoreDelivery: ScoreWithRubricSchema = Field(
-        default_factory=lambda: ScoreWithRubricSchema(
-            score=8,
-            label="Delivery",
-            rubric="Steady speech rate and natural conversational pauses.",
-        )
-    )
-    strongestMoment: str = "Your direct refutation of the core premise held firm."
-    improvementOpportunity: str = "Introduce your main supporting evidence earlier in the turn."
+    scoreTechnique: Optional[ScoreWithRubricSchema] = None
+    scoreGrammar: Optional[ScoreWithRubricSchema] = None
+    scoreVocabulary: Optional[ScoreWithRubricSchema] = None
+    scoreDelivery: Optional[ScoreWithRubricSchema] = None
+    strongestMoment: Optional[str] = None
+    improvementOpportunity: Optional[str] = None
 
 
 class ReviewFeedbackRequestSchema(BaseModel):
@@ -440,22 +416,22 @@ class MainLanguageAnalysisResult(BaseModel):
 class DebateReviewerResult(BaseModel):
     outcome: Literal["user_win", "opponent_win", "draw", "undetermined"]
     target_skill_demonstrated: bool
-    mastery_stars: Literal[1, 2, 3] = 1
+    mastery_stars: Literal[0, 1, 2, 3] = 0
     mastery_note: Optional[str] = None
     skill_summary: str
     argument_strength: str
     argument_improvement: str
     strategic_insight: Optional[str] = None
-    score_technique: int = 8
-    score_grammar: int = 8
-    score_vocabulary: int = 8
-    score_delivery: int = 8
-    score_technique_rubric: str = "Directly addressed opposing arguments with structured counterpoints."
-    score_grammar_rubric: str = "Grammatically clear and coherent speech under time pressure."
-    score_vocabulary_rubric: str = "Appropriate vocabulary and phrase variation."
-    score_delivery_rubric: str = "Consistent pacing and fluent spoken delivery."
-    strongest_moment: str = "Your rebuttal in turn 2 addressed the opposing premise directly."
-    improvement_opportunity: str = "State your core claim earlier before elaborate setup."
+    score_technique: Optional[int] = None
+    score_grammar: Optional[int] = None
+    score_vocabulary: Optional[int] = None
+    score_delivery: Optional[int] = None
+    score_technique_rubric: Optional[str] = None
+    score_grammar_rubric: Optional[str] = None
+    score_vocabulary_rubric: Optional[str] = None
+    score_delivery_rubric: Optional[str] = None
+    strongest_moment: Optional[str] = None
+    improvement_opportunity: Optional[str] = None
 
 
 class OpponentMoveResponse(BaseModel):

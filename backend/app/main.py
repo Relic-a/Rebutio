@@ -65,6 +65,7 @@ async def lifespan(app: FastAPI):
         database=db_type,
         openrouter_configured=bool(settings.OPENROUTER_API_KEY),
         router_configured=bool(settings.RAMP_ROUTER_API_KEY),
+        jwt_verification_configured=bool(settings.INSFORGE_JWT_SECRET or settings.INSFORGE_JWT_PUBLIC_KEY),
         modal_configured=bool(settings.MODAL_APP_NAME),
         log_level=settings.LOG_LEVEL,
         log_format=settings.LOG_FORMAT,
@@ -79,6 +80,7 @@ async def lifespan(app: FastAPI):
         final_patch=f"openrouter:{settings.OPENROUTER_FINAL_PATCH_MODEL}",
         reviewer=f"router:{settings.ROUTER_REVIEW_MODEL}" if settings.ROUTER_REVIEW_MODEL and settings.RAMP_ROUTER_API_KEY else f"openrouter:{settings.OPENROUTER_REVIEW_MODEL}",
         topic_generator=f"router:{settings.ROUTER_TOPIC_MODEL}" if settings.ROUTER_TOPIC_MODEL and settings.RAMP_ROUTER_API_KEY else f"openrouter:{settings.OPENROUTER_TOPIC_MODEL}",
+        coach=f"router:{settings.ROUTER_COACH_MODEL}" if settings.ROUTER_COACH_MODEL and settings.RAMP_ROUTER_API_KEY else f"openrouter:{settings.OPENROUTER_COACH_MODEL}",
         transcription=f"openrouter:{settings.OPENROUTER_TRANSCRIPTION_MODEL}",
         speech=f"openrouter:{settings.OPENROUTER_TTS_MODEL}",
     )
@@ -98,6 +100,7 @@ async def lifespan(app: FastAPI):
                 settings.ROUTER_ANALYSIS_MODEL,
                 settings.ROUTER_REVIEW_MODEL,
                 settings.ROUTER_TOPIC_MODEL,
+                settings.ROUTER_COACH_MODEL,
             ]
             for m in configured_models:
                 if m and m not in available_models:

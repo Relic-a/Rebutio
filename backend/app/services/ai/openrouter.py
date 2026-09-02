@@ -157,10 +157,13 @@ class OpenRouterClient:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         response_format_json: bool = False,
+        reasoning_effort: Optional[str] = None,
     ) -> AICompletionResult:
         """
         Executes text chat completion with privacy safeguards:
         data_collection = deny, zdr = true, require_parameters = true.
+        Configures model reasoning effort per task when specified.
+        Excludes reasoning from the returned visible content.
         Returns AICompletionResult with content and usage/request metadata.
         """
         if not self.is_configured:
@@ -178,9 +181,11 @@ class OpenRouterClient:
             "provider": {
                 "data_collection": "deny",
                 "zdr": True,
-                "require_parameters": True,
             },
         }
+
+        if reasoning_effort and reasoning_effort.strip():
+            payload["reasoning"] = {"effort": reasoning_effort.strip().lower()}
 
         if response_format_json:
             payload["response_format"] = {"type": "json_object"}
@@ -192,12 +197,28 @@ class OpenRouterClient:
                 resp.raise_for_status()
 
             res_json = resp.json()
+            if "error" in res_json and res_json["error"]:
+                err_msg = res_json["error"].get("message") if isinstance(res_json["error"], dict) else str(res_json["error"])
+                logger.error("openrouter.chat.error_payload", error_message=err_msg, model=model)
+                raise RuntimeError(f"OpenRouter API error: {err_msg}")
+
             choices = res_json.get("choices", [])
             if not choices:
                 raise ValueError("OpenRouter returned empty choices")
 
             first_choice = choices[0]
-            content = first_choice.get("message", {}).get("content", "").strip()
+            choice_msg = first_choice.get("message", {})
+            raw_content = choice_msg.get("content", "") or ""
+            reasoning_text = choice_msg.get("reasoning") or choice_msg.get("reasoning_content")
+
+            # Extract and strip <think> tags if model emitted thought tokens in content
+            import re
+            extracted_thinks = re.findall(r"<think>([\s\S]*?)</think>", raw_content)
+            if extracted_thinks and not reasoning_text:
+                reasoning_text = "\n".join(extracted_thinks).strip()
+
+            # Clean reasoning/thinking tags completely from visible content
+            content = re.sub(r"<think>[\s\S]*?(?:</think>|$)", "", raw_content).strip()
             finish_reason = first_choice.get("finish_reason")
             
             usage = res_json.get("usage", {})
@@ -210,6 +231,7 @@ class OpenRouterClient:
 
             return AICompletionResult(
                 content=content,
+                reasoning=reasoning_text,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 provider_request_id=provider_req_id,
@@ -225,6 +247,7 @@ class OpenRouterClient:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         response_format_json: bool = False,
+        reasoning_effort: Optional[str] = None,
     ) -> str:
         result = await self.chat_completion_raw(
             messages=messages,
@@ -232,8 +255,10 @@ class OpenRouterClient:
             temperature=temperature,
             max_tokens=max_tokens,
             response_format_json=response_format_json,
+            reasoning_effort=reasoning_effort,
         )
         return result.content
 
 
 openrouter_client = OpenRouterClient()
+
