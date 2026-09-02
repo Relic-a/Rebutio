@@ -108,6 +108,9 @@ export type DebateReview = {
   scoreDelivery?: ScoreWithRubric;
   strongestMoment?: string;
   improvementOpportunity?: string;
+  grammarAdvice?: string;
+  vocabularyAdvice?: string;
+  pronunciationAdvice?: string;
 };
 
 export type PronunciationPattern = {

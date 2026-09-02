@@ -176,6 +176,8 @@ class ScoreWithRubricSchema(BaseModel):
 
 
 class DebateReviewSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     sessionId: Optional[str] = None
     outcome: Literal["user_win", "opponent_win", "draw", "undetermined"]
     stars: StarAssessmentSchema
@@ -195,6 +197,9 @@ class DebateReviewSchema(BaseModel):
     scoreDelivery: Optional[ScoreWithRubricSchema] = None
     strongestMoment: Optional[str] = None
     improvementOpportunity: Optional[str] = None
+    grammarAdvice: Optional[str] = Field(default=None, alias="grammarAdvice")
+    vocabularyAdvice: Optional[str] = Field(default=None, alias="vocabularyAdvice")
+    pronunciationAdvice: Optional[str] = Field(default=None, alias="pronunciationAdvice")
 
 
 class ReviewFeedbackRequestSchema(BaseModel):
@@ -420,6 +425,9 @@ class DebateReviewerResult(BaseModel):
     mastery_stars: Literal[0, 1, 2, 3] = 0
     mastery_note: Optional[str] = None
     skill_summary: str
+    grammar_advice: Optional[str] = None
+    vocabulary_advice: Optional[str] = None
+    pronunciation_advice: Optional[str] = None
     argument_strength: str
     argument_improvement: str
     strategic_insight: Optional[str] = None

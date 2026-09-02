@@ -282,6 +282,22 @@
           <p id="revImprovementOpportunity" class="text-xs text-slate-200 leading-relaxed">-</p>
         </div>
       </div>
+
+      <!-- Spoken Language Advice (Grammar, Vocab, Pronunciation) -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <h3 class="text-xs font-bold text-fuchsia-400 uppercase tracking-wider mb-2">Grammar Advice</h3>
+          <p id="revGrammarAdvice" class="text-xs text-slate-200 leading-relaxed">-</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <h3 class="text-xs font-bold text-cyan-400 uppercase tracking-wider mb-2">Vocabulary Advice</h3>
+          <p id="revVocabularyAdvice" class="text-xs text-slate-200 leading-relaxed">-</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <h3 class="text-xs font-bold text-yellow-400 uppercase tracking-wider mb-2">Pronunciation Advice</h3>
+          <p id="revPronunciationAdvice" class="text-xs text-slate-200 leading-relaxed">-</p>
+        </div>
+      </div>
     </div>
 
     <!-- 4. COACH MODE TAB -->
@@ -562,6 +578,9 @@
 
       document.getElementById('revStrongestMoment').innerText = r.strongest_moment || 'N/A';
       document.getElementById('revImprovementOpportunity').innerText = r.improvement_opportunity || 'N/A';
+      document.getElementById('revGrammarAdvice').innerText = r.grammar_advice || 'N/A';
+      document.getElementById('revVocabularyAdvice').innerText = r.vocabulary_advice || 'N/A';
+      document.getElementById('revPronunciationAdvice').innerText = r.pronunciation_advice || 'N/A';
     }
 
     function sendReviewToCoach() {

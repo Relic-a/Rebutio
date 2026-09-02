@@ -53,6 +53,7 @@ class DebateTurn(BaseModel):
     turn_number: int
     speaker: str  # "user" | "opponent"
     text: str
+    translation: Optional[str] = None
     audio_metrics: Optional[Dict[str, Any]] = None  # phonemes, wpm, duration_sec, client_response_delay_ms
     duration_sec: float = 0.0
     timestamp: str = Field(default_factory=_now_iso)
@@ -88,16 +89,21 @@ class DebateState(BaseModel):
         return [t for t in self.turns if t.speaker == "opponent"]
 
     def to_transcript_dicts(self) -> List[Dict[str, Any]]:
-        return [
-            {
+        result = []
+        for t in self.turns:
+            d = {
                 "speaker": t.speaker,
                 "turn_number": t.turn_number,
                 "text": t.text,
                 "duration_sec": t.duration_sec,
                 "audio_available": bool(t.audio_metrics),
             }
-            for t in self.turns
-        ]
+            if getattr(t, "translation", None):
+                d["translation"] = t.translation
+            if t.audio_metrics and t.audio_metrics.get("phonemes"):
+                d["phonemes"] = t.audio_metrics.get("phonemes")
+            result.append(d)
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +146,9 @@ class ReviewState(BaseModel):
     score_delivery: Optional[ScoreCard] = None
     strongest_moment: Optional[str] = None
     improvement_opportunity: Optional[str] = None
+    grammar_advice: Optional[str] = None
+    vocabulary_advice: Optional[str] = None
+    pronunciation_advice: Optional[str] = None
     argument_feedback: Optional[Dict[str, Any]] = None  # strength, improvement, insight
     language_feedback: Optional[Dict[str, Any]] = None  # pronunciation, fluency, grammar, vocabulary, clarity
     raw_reviewer_response: Optional[Dict[str, Any]] = None

@@ -625,6 +625,9 @@ class DebateOrchestrator:
                     score_deliv = db_review.score_delivery
                     strongest_mom = db_review.strongest_moment
                     improve_opp = db_review.improvement_opportunity
+                    grammar_adv = db_review.grammar_advice
+                    vocab_adv = db_review.vocabulary_advice
+                    pron_adv = db_review.pronunciation_advice
                     rubric_tech = db_review.score_technique_rubric
                     rubric_gram = db_review.score_grammar_rubric
                     rubric_vocab = db_review.score_vocabulary_rubric
@@ -656,6 +659,9 @@ class DebateOrchestrator:
                         rubric_deliv = "Insufficient audio recording length to evaluate delivery."
                         strongest_mom = None
                         improve_opp = "Engage in at least two full debate turns with reasons and examples to receive targeted coaching."
+                        grammar_adv = None
+                        vocab_adv = None
+                        pron_adv = None
                         arg_feedback = {
                             "strength": "Session concluded before substantive debate arguments were established.",
                             "improvement": "Engage in full debate exchanges to receive strategic feedback.",
@@ -672,7 +678,22 @@ class DebateOrchestrator:
                     else:
                         opp_side = "disagree" if session.user_side == "agree" else "agree"
 
-                        # Task A: Independent Debate Reviewer (does not need phonemes)
+                        # Build turns evidence with phonemes and translation if available
+                        user_turns_evidence = []
+                        for t in turns:
+                            if t.speaker == "user":
+                                txt = encryptor.decrypt_str(t.text_encrypted) if t.text_encrypted else ""
+                                matching_ev = next((e for e in all_evidence if e.get("turn_number") == t.turn_number), {})
+                                user_turns_evidence.append({
+                                    "turn_number": t.turn_number,
+                                    "transcript": txt,
+                                    "client_response_delay_ms": t.client_response_delay_ms,
+                                    "phonemes": matching_ev.get("phonemes", []),
+                                    "translation": matching_ev.get("translation"),
+                                    "speech_metrics": matching_ev.get("speech_metrics", {}),
+                                })
+
+                        # Task A: Spoken-Language Debate Reviewer (receives turns evidence)
                         reviewer_messages = build_debate_reviewer_prompt(
                             topic=session.topic_text,
                             user_side=session.user_side,
@@ -681,6 +702,7 @@ class DebateOrchestrator:
                             skill_name=session.skill_name,
                             difficulty=session.difficulty,
                             full_transcript=full_transcript,
+                            turns_evidence=user_turns_evidence,
                         )
                         reviewer_task = asyncio.create_task(ai_gateway.review_debate(reviewer_messages))
 
@@ -747,6 +769,9 @@ class DebateOrchestrator:
                             rubric_vocab = reviewer_res.score_vocabulary_rubric or "Appropriate and precise word choices tailored to the topic."
                             strongest_mom = reviewer_res.strongest_moment
                             improve_opp = reviewer_res.improvement_opportunity
+                            grammar_adv = reviewer_res.grammar_advice
+                            vocab_adv = reviewer_res.vocabulary_advice
+                            pron_adv = reviewer_res.pronunciation_advice
                         else:
                             # Grounded uninflated fallback when AI reviewer is unavailable
                             score_tech = None
@@ -759,6 +784,9 @@ class DebateOrchestrator:
                             rubric_deliv = "Spoke with understandable pacing across turns." if evidence_assessment.has_sufficient_delivery_evidence else "No audio recording available to evaluate spoken delivery."
                             strongest_mom = None
                             improve_opp = "Review evaluation service unavailable. Try another debate session."
+                            grammar_adv = None
+                            vocab_adv = None
+                            pron_adv = None
 
                         lang_feedback = None
                         if patch_res:
@@ -839,6 +867,9 @@ class DebateOrchestrator:
                         score_delivery_rubric=rubric_deliv,
                         strongest_moment=strongest_mom,
                         improvement_opportunity=improve_opp,
+                        grammar_advice=grammar_adv,
+                        vocabulary_advice=vocab_adv,
+                        pronunciation_advice=pron_adv,
                     )
 
                 # Ensure Topic is consumed
@@ -859,6 +890,9 @@ class DebateOrchestrator:
                     "score_delivery": score_deliv,
                     "strongest_moment": strongest_mom,
                     "improvement_opportunity": improve_opp,
+                    "grammar_advice": grammar_adv,
+                    "vocabulary_advice": vocab_adv,
+                    "pronunciation_advice": pron_adv,
                     "rubric_technique": rubric_tech,
                     "rubric_grammar": rubric_gram,
                     "rubric_vocabulary": rubric_vocab,
@@ -978,4 +1012,7 @@ class DebateOrchestrator:
             scoreDelivery=score_deliv_schema,
             strongestMoment=r.strongest_moment,
             improvementOpportunity=r.improvement_opportunity,
+            grammarAdvice=getattr(r, "grammar_advice", None),
+            vocabularyAdvice=getattr(r, "vocabulary_advice", None),
+            pronunciationAdvice=getattr(r, "pronunciation_advice", None),
         )

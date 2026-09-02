@@ -101,8 +101,11 @@ function Results() {
   const rubricDelivery = r.scoreDelivery?.rubric ?? r.languageFeedback?.fluency?.summary ?? "Insufficient audio recording length to evaluate delivery.";
 
   const pronunciationFindings = r.languageFeedback?.pronunciation ?? [];
-  const strongestMoment = r.languageFeedback?.clarity?.summary || r.languageFeedback?.grammar?.summary || r.languageFeedback?.vocabulary?.summary || r.strongestMoment || "Your speech stayed understandable through the exchange.";
-  const improvementOpportunity = pronunciationFindings[0]?.note || r.languageFeedback?.fluency?.summary || r.languageFeedback?.grammar?.summary || r.improvementOpportunity || "Keep your next answer short and easy to say aloud.";
+  const strongestMoment = r.strongestMoment || r.languageFeedback?.clarity?.summary || r.languageFeedback?.grammar?.summary || r.languageFeedback?.vocabulary?.summary || "Your speech stayed understandable through the exchange.";
+  const improvementOpportunity = r.improvementOpportunity || pronunciationFindings[0]?.note || r.languageFeedback?.fluency?.summary || r.languageFeedback?.grammar?.summary || "Keep your next answer short and easy to say aloud.";
+  const grammarAdvice = r.grammarAdvice;
+  const vocabularyAdvice = r.vocabularyAdvice;
+  const pronunciationAdvice = r.pronunciationAdvice;
 
   return (
     <main className="mx-auto min-h-dvh w-full max-w-md px-5 py-8 bg-parchment text-ink flex flex-col pb-16">
@@ -285,6 +288,54 @@ function Results() {
             <PronunciationText text={improvementOpportunity} className="whitespace-pre-wrap" />
           </p>
         </div>
+
+        {grammarAdvice && (
+          <div className="rounded-2xl bg-purple-50/70 border border-purple-200/40 p-3.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-purple-900">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+              </svg>
+              <span>Grammar & Syntax</span>
+            </div>
+            <p className="mt-1.5 text-xs font-medium text-ink leading-relaxed">
+              <PronunciationText text={grammarAdvice} className="whitespace-pre-wrap" />
+            </p>
+          </div>
+        )}
+
+        {vocabularyAdvice && (
+          <div className="rounded-2xl bg-sky-50/70 border border-sky-200/40 p-3.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-sky-900">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="16" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12.01" y2="8" />
+              </svg>
+              <span>Vocabulary & Collocations</span>
+            </div>
+            <p className="mt-1.5 text-xs font-medium text-ink leading-relaxed">
+              <PronunciationText text={vocabularyAdvice} className="whitespace-pre-wrap" />
+            </p>
+          </div>
+        )}
+
+        {pronunciationAdvice && (
+          <div className="rounded-2xl bg-amber-50/70 border border-amber-200/40 p-3.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+              <span>Pronunciation & Acoustics</span>
+            </div>
+            <p className="mt-1.5 text-xs font-medium text-ink leading-relaxed">
+              <PronunciationText text={pronunciationAdvice} className="whitespace-pre-wrap" />
+            </p>
+          </div>
+        )}
       </motion.section>
 
       {/* 4. Primary CTA: Review with Coach */}

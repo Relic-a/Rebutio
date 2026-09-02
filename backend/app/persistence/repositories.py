@@ -543,6 +543,9 @@ class DebateSessionRepository:
         score_delivery_rubric: Optional[str] = None,
         strongest_moment: Optional[str] = None,
         improvement_opportunity: Optional[str] = None,
+        grammar_advice: Optional[str] = None,
+        vocabulary_advice: Optional[str] = None,
+        pronunciation_advice: Optional[str] = None,
     ) -> DebateReview:
         stmt = select(DebateReview).where(DebateReview.session_id == session_id)
         res = await self.db.execute(stmt)
@@ -572,6 +575,9 @@ class DebateSessionRepository:
             existing.score_delivery_rubric = score_delivery_rubric
             existing.strongest_moment = strongest_moment
             existing.improvement_opportunity = improvement_opportunity
+            existing.grammar_advice = grammar_advice
+            existing.vocabulary_advice = vocabulary_advice
+            existing.pronunciation_advice = pronunciation_advice
             review = existing
         else:
             review = DebateReview(
@@ -598,6 +604,9 @@ class DebateSessionRepository:
                 score_delivery_rubric=score_delivery_rubric,
                 strongest_moment=strongest_moment,
                 improvement_opportunity=improvement_opportunity,
+                grammar_advice=grammar_advice,
+                vocabulary_advice=vocabulary_advice,
+                pronunciation_advice=pronunciation_advice,
             )
             self.db.add(review)
 

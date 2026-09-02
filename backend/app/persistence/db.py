@@ -92,6 +92,18 @@ async def init_db():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
+            if normalized_url.startswith("sqlite"):
+                from sqlalchemy import text
+
+                def _add_sqlite_cols(sync_conn):
+                    result = sync_conn.execute(text("PRAGMA table_info(debate_reviews)"))
+                    existing_cols = {row[1] for row in result.fetchall()}
+                    for col in ("grammar_advice", "vocabulary_advice", "pronunciation_advice"):
+                        if col not in existing_cols:
+                            sync_conn.execute(text(f"ALTER TABLE debate_reviews ADD COLUMN {col} TEXT"))
+
+                await conn.run_sync(_add_sqlite_cols)
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_factory() as session:

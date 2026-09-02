@@ -99,6 +99,20 @@ class ReviewerEngine:
                 duration_ms=dur_ms,
             )
 
+        turns_evidence = []
+        for t in debate_state.turns:
+            if t.speaker == "user":
+                matching_ev = next((e for e in all_evidence if e.get("turn_number") == t.turn_number), {})
+                turns_evidence.append({
+                    "turn_number": t.turn_number,
+                    "transcript": t.text,
+                    "translation": getattr(t, "translation", None) or matching_ev.get("translation"),
+                    "phonemes": matching_ev.get("phonemes", []) or (t.audio_metrics or {}).get("phonemes", []),
+                    "phoneme_evidence": matching_ev.get("phonemes", []) or (t.audio_metrics or {}).get("phonemes", []),
+                    "client_response_delay_ms": (t.audio_metrics or {}).get("client_response_delay_ms", 0),
+                    "speech_metrics": matching_ev.get("speech_metrics", {}),
+                })
+
         # 3. Build Prompts
         reviewer_messages = build_debate_reviewer_prompt(
             topic=topic,
@@ -108,19 +122,8 @@ class ReviewerEngine:
             skill_name=skill_name,
             difficulty=difficulty,
             full_transcript=full_transcript,
+            turns_evidence=turns_evidence,
         )
-
-        turns_evidence = []
-        for t in debate_state.turns:
-            if t.speaker == "user":
-                matching_ev = next((e for e in all_evidence if e.get("turn_number") == t.turn_number), {})
-                turns_evidence.append({
-                    "turn_number": t.turn_number,
-                    "transcript": t.text,
-                    "client_response_delay_ms": (t.audio_metrics or {}).get("client_response_delay_ms", 0),
-                    "phoneme_evidence": matching_ev.get("phonemes", []),
-                    "speech_metrics": matching_ev.get("speech_metrics", {}),
-                })
 
         language_messages = build_language_analysis_prompt(
             topic=topic,
@@ -164,6 +167,9 @@ class ReviewerEngine:
 
                 strongest_moment = reviewer_res.strongest_moment
                 improvement_opp = reviewer_res.improvement_opportunity
+                grammar_advice = reviewer_res.grammar_advice
+                vocabulary_advice = reviewer_res.vocabulary_advice
+                pronunciation_advice = reviewer_res.pronunciation_advice
                 arg_feedback = {
                     "strength": reviewer_res.argument_strength or "Articulated your position across the exchange.",
                     "improvement": reviewer_res.argument_improvement or "Push more aggressively on the core opposing premise.",
@@ -181,6 +187,9 @@ class ReviewerEngine:
                 score_deliv, rubric_deliv = None, "Evaluation unavailable."
                 strongest_moment = None
                 improvement_opp = "Review service unavailable."
+                grammar_advice = None
+                vocabulary_advice = None
+                pronunciation_advice = None
                 arg_feedback = {"strength": "Completed the debate exchange.", "improvement": "Try another round.", "insight": None}
 
             lang_feedback = None
@@ -225,8 +234,11 @@ class ReviewerEngine:
             score_deliv = 8 if ev_assessment.has_sufficient_delivery_evidence else None
             rubric_deliv = "Measured cadence averaging 138 WPM with clean transitions between points." if ev_assessment.has_sufficient_delivery_evidence else "No audio recording available to evaluate delivery."
 
-            strongest_moment = "Turn 2: Direct challenge to the budget elasticity premise without hedging."
-            improvement_opp = "Smooth out the consonant transition on 'proportionally' to avoid slight dental fricative softening."
+            strongest_moment = "Turn 2: Crisp spoken delivery of complex conditional syntax without hesitation."
+            improvement_opp = "Vary spoken sentence lengths so key points stand out with more rhythmic punch."
+            grammar_advice = "Solid use of concessive clauses ('While AI writes...', 'Even with fixed budgets...'); watch clause density to avoid overly long spoken run-ons."
+            vocabulary_advice = "Effective domain terminology including 'apprenticeship gap' and 'constrained budgets'; try 'diminish' or 'curtail' as alternatives to 'cut'."
+            pronunciation_advice = "In Turn 2, the voiceless dental fricative /θ/ in [[pronounce:proportionally]] softened toward /s/. Place the tongue tip lightly between your front teeth."
 
             arg_feedback = {
                 "strength": "Refusing to allow the opponent to pivot from budget constraints to theoretical software demand.",
@@ -295,6 +307,9 @@ class ReviewerEngine:
             score_delivery=ScoreCard(score=score_deliv, label="Delivery", rubric=rubric_deliv),
             strongest_moment=strongest_moment,
             improvement_opportunity=improvement_opp,
+            grammar_advice=grammar_advice,
+            vocabulary_advice=vocabulary_advice,
+            pronunciation_advice=pronunciation_advice,
             argument_feedback=arg_feedback,
             language_feedback=lang_feedback,
             raw_reviewer_response=raw_reviewer_dict,

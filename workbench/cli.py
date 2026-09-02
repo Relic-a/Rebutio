@@ -12,6 +12,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
+from rich.markup import escape
 
 from workbench.runner import WorkbenchRunner
 from workbench.state.models import (
@@ -226,11 +227,25 @@ def review_run(state: str, live: bool, save: bool, show_prompts: bool, json_out:
     console.print(table)
 
     # Feedback Cards
-    if rev.strongest_moment or rev.improvement_opportunity:
+    feedback_lines = []
+    if rev.strongest_moment:
+        feedback_lines.append(f"[bold green]Strongest Spoken Moment:[/] {escape(str(rev.strongest_moment))}")
+    if rev.improvement_opportunity:
+        feedback_lines.append(f"[bold yellow]Improvement Opportunity:[/] {escape(str(rev.improvement_opportunity))}")
+    if getattr(rev, "grammar_advice", None):
+        feedback_lines.append(f"[bold magenta]Grammar Advice:[/] {escape(str(rev.grammar_advice))}")
+    if getattr(rev, "vocabulary_advice", None):
+        feedback_lines.append(f"[bold blue]Vocabulary Advice:[/] {escape(str(rev.vocabulary_advice))}")
+    if getattr(rev, "pronunciation_advice", None):
+        feedback_lines.append(f"[bold yellow]Pronunciation Advice:[/] {escape(str(rev.pronunciation_advice))}")
+
+    strat_insight = (rev.argument_feedback or {}).get("insight")
+    if strat_insight:
+        feedback_lines.append(f"[bold cyan]Strategic Insight:[/] {escape(str(strat_insight))}")
+
+    if feedback_lines:
         console.print(Panel(
-            f"[bold green]Strongest Moment:[/] {rev.strongest_moment or 'N/A'}\n\n"
-            f"[bold yellow]Improvement Opportunity:[/] {rev.improvement_opportunity or 'N/A'}\n\n"
-            f"[bold cyan]Strategic Insight:[/] {(rev.argument_feedback or {}).get('insight') or 'N/A'}",
+            "\n\n".join(feedback_lines),
             title="Spoken Language & Argument Feedback",
         ))
 

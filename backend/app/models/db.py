@@ -180,6 +180,9 @@ class DebateReview(Base):
     score_delivery_rubric = Column(Text, nullable=True)
     strongest_moment = Column(Text, nullable=True)
     improvement_opportunity = Column(Text, nullable=True)
+    grammar_advice = Column(Text, nullable=True)
+    vocabulary_advice = Column(Text, nullable=True)
+    pronunciation_advice = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
