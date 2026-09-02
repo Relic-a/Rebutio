@@ -213,6 +213,7 @@ class CoachEngine:
                 "delivery": review.score_delivery if review else 8,
                 "strongest_moment": review.strongest_moment if review else "Your direct refutation held strong under pressure.",
                 "improvement_opportunity": review.improvement_opportunity if review else "State your main claim earlier in the turn.",
+                "language_feedback": encryptor.decrypt_json(review.language_feedback_encrypted) if review and review.language_feedback_encrypted else {},
             }
 
             prompt_messages = build_coach_opening_prompt(
@@ -232,9 +233,9 @@ class CoachEngine:
                     messages=prompt_messages,
                     schema_cls=CoachOpeningAnalysisResult,
                     fallback_factory=lambda: CoachOpeningAnalysisResult(
-                        overall_assessment=f"You articulated your position on '{session.topic_text}' clearly across all exchanges.",
-                        most_important_strength=review.strongest_moment if review and review.strongest_moment else "You held your ground with strong counterpoints.",
-                        highest_value_improvement=review.improvement_opportunity if review and review.improvement_opportunity else "Lead with your main claim earlier before setting up context.",
+                        overall_assessment="Here is the highest-value pattern in your spoken English from this session.",
+                        most_important_strength=review.strongest_moment if review and review.strongest_moment else "Your speech stayed understandable across the exchange.",
+                        highest_value_improvement=review.improvement_opportunity if review and review.improvement_opportunity else "Use shorter sentences so each spoken idea lands clearly.",
                         concrete_example=transcript[0]["text"] if transcript else "Your opening argument.",
                         evidence_turn_number=1,
                         suggested_quick_replies=[
@@ -249,9 +250,9 @@ class CoachEngine:
             except Exception as e:
                 logger.warning("coach.opening_analysis.failed_using_fallback", error=str(e))
                 opening_res = CoachOpeningAnalysisResult(
-                    overall_assessment=f"You articulated your position on '{session.topic_text}' clearly across all exchanges.",
-                    most_important_strength=review.strongest_moment if review and review.strongest_moment else "You held your ground with strong counterpoints.",
-                    highest_value_improvement=review.improvement_opportunity if review and review.improvement_opportunity else "Lead with your main claim earlier before setting up context.",
+                    overall_assessment="Here is the highest-value pattern in your spoken English from this session.",
+                    most_important_strength=review.strongest_moment if review and review.strongest_moment else "Your speech stayed understandable across the exchange.",
+                    highest_value_improvement=review.improvement_opportunity if review and review.improvement_opportunity else "Use shorter sentences so each spoken idea lands clearly.",
                     concrete_example=transcript[0]["text"] if transcript else "Your opening argument.",
                     evidence_turn_number=1,
                     suggested_quick_replies=[
@@ -380,6 +381,7 @@ class CoachEngine:
                 "score_delivery": review.score_delivery if review else 8,
                 "strongest_moment": review.strongest_moment if review else "Solid refutation in turn 2.",
                 "improvement_opportunity": review.improvement_opportunity if review else "Lead with your main point earlier.",
+                "language_feedback": encryptor.decrypt_json(review.language_feedback_encrypted) if review and review.language_feedback_encrypted else {},
             }
 
         memory_md, _ = await coach_repo.get_memory_markdown(user_id)
@@ -406,7 +408,7 @@ class CoachEngine:
 
         def default_fallback():
             return CoachTurnResponse(
-                reply_text="Under conversational pressure, structuring your point into a clear claim, a concrete reason, and a direct example keeps your argument commanding.",
+                reply_text="Keep the spoken sentence short: say one clear idea, pause, then add the supporting detail. Send a voice attempt and I can check its phonemes and timing.",
                 requested_tool=None,
                 tool_args=None,
                 evidence_card=None,
