@@ -48,7 +48,7 @@ export function PronunciationText({ text, className }: Props) {
   if (lastIndex < text.length) parts.push({ kind: "text", value: text.slice(lastIndex) });
 
   return (
-    <p className={className}>
+    <span className={className}>
       {parts.map((part, index) =>
         part.kind === "text" ? (
           <Fragment key={index}>{part.value}</Fragment>
@@ -66,6 +66,6 @@ export function PronunciationText({ text, className }: Props) {
           </button>
         )
       )}
-    </p>
+    </span>
   );
 }
