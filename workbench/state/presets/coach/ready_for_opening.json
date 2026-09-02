@@ -1,0 +1,121 @@
+{
+  "user_id": "workbench-user-alice",
+  "user_preferences": {
+    "intensity": "balanced",
+    "interests": ["technology", "careers"]
+  },
+  "speech_profile": {
+    "recurring_pronunciation": [
+      {"sound": "θ", "heard_in": ["think", "therefore"], "occurrences": 2}
+    ],
+    "fluency_summary": "Steady pacing with 1.3s turn response delay."
+  },
+  "coach_memory_markdown": "# Rebutio Coach Memory\n\n## User Preferences & Goals\n- User values concise arguments and direct counter-evidence.\n\n## Historical Summary\n- Solid logical structure in opening statements.\n- Focus: Maintain clear enunciation on voiceless 'th' consonants under pressure.\n\n## Recent Debates\n",
+  "debate_state": {
+    "session_id": "sess-preset-completed-strong",
+    "topic": "Generative AI will reduce junior developer job opportunities within the next three years.",
+    "user_side": "agree",
+    "opponent_side": "disagree",
+    "skill_id": "direct_refutation",
+    "skill_name": "Direct Refutation",
+    "difficulty": "steady",
+    "intensity": "balanced",
+    "total_turns": 3,
+    "current_turn": 3,
+    "status": "finished",
+    "turns": [
+      {
+        "turn_number": 1,
+        "speaker": "user",
+        "text": "Generative AI already handles boilerplate and routine tasks that entry-level developers traditionally learned from. Because senior engineers can now produce the output of multiple juniors with coding agents, companies will drastically cut entry-level hiring pipelines.",
+        "duration_sec": 14.5
+      },
+      {
+        "turn_number": 1,
+        "speaker": "opponent",
+        "text": "While AI writes boilerplate quickly, software engineering has never been just about syntax. Reducing the cost of writing code means organizations can build ten times more software, creating new entry-level roles focused on systems integration, QA, and tool orchestration rather than shrinking headcount.",
+        "duration_sec": 16.0
+      },
+      {
+        "turn_number": 2,
+        "speaker": "user",
+        "text": "Your claim assumes overall software budgets will expand proportionally, but corporate IT budgets are constrained. When productivity surges, companies pocket the savings instead of hiring unproven juniors to supervise complex systems they don't yet understand.",
+        "duration_sec": 16.2
+      },
+      {
+        "turn_number": 2,
+        "speaker": "opponent",
+        "text": "Even with fixed budgets, organizations face a massive backlog of unmet software demand that was previously cost-prohibitive. Juniors who learn to pilot AI agents will outpace traditional coders, making them cost-effective contributors from day one rather than liabilities.",
+        "duration_sec": 15.8
+      },
+      {
+        "turn_number": 3,
+        "speaker": "user",
+        "text": "In conclusion, that argument overlooks the critical apprenticeship gap. If juniors only pilot AI prompts without understanding fundamental engineering principles, firms will find senior review bottlenecks even worse. Therefore, companies will prefer fewer, highly experienced architects over expanded junior teams. That concludes my argument.",
+        "duration_sec": 18.0
+      }
+    ],
+    "evidence": [
+      {
+        "turn_number": 1,
+        "phonemes": [{"sound": "dʒ", "heard_in": ["junior"], "confidence": 0.94}],
+        "speech_metrics": {"duration_ms": 14500, "words_per_minute": 138}
+      },
+      {
+        "turn_number": 2,
+        "phonemes": [{"sound": "θ", "heard_in": ["proportionally"], "confidence": 0.88}],
+        "speech_metrics": {"duration_ms": 16200, "words_per_minute": 142}
+      },
+      {
+        "turn_number": 3,
+        "phonemes": [{"sound": "θ", "heard_in": ["therefore"], "confidence": 0.90}],
+        "speech_metrics": {"duration_ms": 18000, "words_per_minute": 135}
+      }
+    ],
+    "is_closing_statement": true,
+    "status": "finished"
+  },
+  "review_state": {
+    "session_id": "sess-preset-completed-strong",
+    "topic": "Generative AI will reduce junior developer job opportunities within the next three years.",
+    "user_side": "agree",
+    "opponent_side": "disagree",
+    "skill_id": "direct_refutation",
+    "skill_name": "Direct Refutation",
+    "difficulty": "steady",
+    "evidence_assessment": {
+      "has_sufficient_evidence": true,
+      "has_sufficient_delivery_evidence": true,
+      "user_turns_count": 3,
+      "substantive_turns_count": 3,
+      "total_user_words": 118
+    },
+    "outcome": "user_win",
+    "mastery_stars": 3,
+    "completed": true,
+    "skill_demonstrated": true,
+    "mastery_note": "Consistently dismantled opponent premises regarding budgets and mentorship.",
+    "score_technique": {"score": 9, "label": "Debate technique", "rubric": "High responsiveness."},
+    "score_grammar": {"score": 9, "label": "Grammar", "rubric": "Complex clauses executed accurately."},
+    "score_vocabulary": {"score": 8, "label": "Vocabulary", "rubric": "Precise terms."},
+    "score_delivery": {"score": 8, "label": "Delivery", "rubric": "Steady tempo."},
+    "strongest_moment": "Direct challenge to budget elasticity in Turn 2.",
+    "improvement_opportunity": "Refine the voiceless 'th' sound in 'proportionally' and 'therefore'.",
+    "language_feedback": {
+      "pronunciation": [
+        {"sound": "θ", "heard_in": ["proportionally", "therefore"], "occurrences": 2, "reportable": true}
+      ]
+    },
+    "duration_ms": 2450.0,
+    "created_at": "2026-09-02T10:08:00Z"
+  },
+  "opening_analysis": null,
+  "thread_messages": [],
+  "active_focus": "Voiceless dental fricatives (/θ/) under pressure",
+  "focus_details": "Keep tongue tip between teeth for 'therefore' and 'think'.",
+  "memory_update_diff": null,
+  "last_coach_prompt": null,
+  "last_coach_raw": null,
+  "last_latency_ms": 0.0,
+  "created_at": "2026-09-02T10:09:00Z"
+}

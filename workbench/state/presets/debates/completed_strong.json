@@ -1,0 +1,93 @@
+{
+  "session_id": "sess-preset-completed-strong",
+  "topic": "Generative AI will reduce junior developer job opportunities within the next three years.",
+  "user_side": "agree",
+  "opponent_side": "disagree",
+  "skill_id": "direct_refutation",
+  "skill_name": "Direct Refutation",
+  "difficulty": "steady",
+  "intensity": "balanced",
+  "total_turns": 3,
+  "current_turn": 3,
+  "status": "finished",
+  "turns": [
+    {
+      "turn_number": 1,
+      "speaker": "user",
+      "text": "Generative AI already handles boilerplate and routine tasks that entry-level developers traditionally learned from. Because senior engineers can now produce the output of multiple juniors with coding agents, companies will drastically cut entry-level hiring pipelines.",
+      "audio_metrics": {
+        "duration_sec": 14.5,
+        "wpm": 138,
+        "phonemes": [{"symbol": "dʒ", "word": "junior", "confidence": 0.94}]
+      },
+      "duration_sec": 14.5,
+      "timestamp": "2026-09-02T10:05:00Z"
+    },
+    {
+      "turn_number": 1,
+      "speaker": "opponent",
+      "text": "While AI writes boilerplate quickly, software engineering has never been just about syntax. Reducing the cost of writing code means organizations can build ten times more software, creating new entry-level roles focused on systems integration, QA, and tool orchestration rather than shrinking headcount.",
+      "audio_metrics": null,
+      "duration_sec": 16.0,
+      "timestamp": "2026-09-02T10:05:15Z"
+    },
+    {
+      "turn_number": 2,
+      "speaker": "user",
+      "text": "Your claim assumes overall software budgets will expand proportionally, but corporate IT budgets are constrained. When productivity surges, companies pocket the savings instead of hiring unproven juniors to supervise complex systems they don't yet understand.",
+      "audio_metrics": {
+        "duration_sec": 16.2,
+        "wpm": 142,
+        "phonemes": [{"symbol": "θ", "word": "proportionally", "confidence": 0.88}]
+      },
+      "duration_sec": 16.2,
+      "timestamp": "2026-09-02T10:06:00Z"
+    },
+    {
+      "turn_number": 2,
+      "speaker": "opponent",
+      "text": "Even with fixed budgets, organizations face a massive backlog of unmet software demand that was previously cost-prohibitive. Juniors who learn to pilot AI agents will outpace traditional coders, making them cost-effective contributors from day one rather than liabilities.",
+      "audio_metrics": null,
+      "duration_sec": 15.8,
+      "timestamp": "2026-09-02T10:06:18Z"
+    },
+    {
+      "turn_number": 3,
+      "speaker": "user",
+      "text": "In conclusion, that argument overlooks the critical apprenticeship gap. If juniors only pilot AI prompts without understanding fundamental engineering principles, firms will find senior review bottlenecks even worse. Therefore, companies will prefer fewer, highly experienced architects over expanded junior teams. That concludes my argument.",
+      "audio_metrics": {
+        "duration_sec": 18.0,
+        "wpm": 135,
+        "phonemes": [
+          {"symbol": "θ", "word": "therefore", "confidence": 0.90},
+          {"symbol": "p", "word": "principles", "confidence": 0.95}
+        ]
+      },
+      "duration_sec": 18.0,
+      "timestamp": "2026-09-02T10:07:00Z"
+    }
+  ],
+  "evidence": [
+    {
+      "turn_number": 1,
+      "phonemes": [{"sound": "dʒ", "heard_in": ["junior"], "confidence": 0.94}],
+      "speech_metrics": {"duration_ms": 14500, "words_per_minute": 138, "pause_count": 2}
+    },
+    {
+      "turn_number": 2,
+      "phonemes": [{"sound": "θ", "heard_in": ["proportionally"], "confidence": 0.88}],
+      "speech_metrics": {"duration_ms": 16200, "words_per_minute": 142, "pause_count": 2}
+    },
+    {
+      "turn_number": 3,
+      "phonemes": [{"sound": "θ", "heard_in": ["therefore"], "confidence": 0.90}],
+      "speech_metrics": {"duration_ms": 18000, "words_per_minute": 135, "pause_count": 3}
+    }
+  ],
+  "is_closing_statement": true,
+  "closing_reason": "Concluding phrase detected: 'in conclusion'",
+  "last_opponent_prompt": null,
+  "last_opponent_raw": null,
+  "last_latency_ms": 0.0,
+  "created_at": "2026-09-02T10:05:00Z"
+}

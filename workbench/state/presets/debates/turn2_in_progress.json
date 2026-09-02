@@ -1,0 +1,63 @@
+{
+  "session_id": "sess-preset-turn2",
+  "topic": "Generative AI will reduce junior developer job opportunities within the next three years.",
+  "user_side": "agree",
+  "opponent_side": "disagree",
+  "skill_id": "direct_refutation",
+  "skill_name": "Direct Refutation",
+  "difficulty": "steady",
+  "intensity": "balanced",
+  "total_turns": 3,
+  "current_turn": 2,
+  "status": "active",
+  "turns": [
+    {
+      "turn_number": 1,
+      "speaker": "user",
+      "text": "Generative AI already handles boilerplate and routine tasks that entry-level developers traditionally learned from. Because senior engineers can now produce the output of multiple juniors with coding agents, companies will drastically cut entry-level hiring pipelines.",
+      "audio_metrics": {"duration_sec": 14.5, "wpm": 138},
+      "duration_sec": 14.5,
+      "timestamp": "2026-09-02T10:05:00Z"
+    },
+    {
+      "turn_number": 1,
+      "speaker": "opponent",
+      "text": "While AI writes boilerplate quickly, software engineering has never been just about syntax. Reducing the cost of writing code means organizations can build ten times more software, creating new entry-level roles focused on systems integration, QA, and tool orchestration rather than shrinking headcount.",
+      "audio_metrics": null,
+      "duration_sec": 16.0,
+      "timestamp": "2026-09-02T10:05:15Z"
+    },
+    {
+      "turn_number": 2,
+      "speaker": "user",
+      "text": "Your claim assumes overall software budgets will expand proportionally, but corporate IT budgets are constrained. When productivity surges, companies pocket the savings instead of hiring unproven juniors to supervise complex systems they don't yet understand.",
+      "audio_metrics": {
+        "duration_sec": 16.2,
+        "wpm": 142,
+        "phonemes": [
+          {"symbol": "θ", "word": "proportionally", "confidence": 0.88}
+        ]
+      },
+      "duration_sec": 16.2,
+      "timestamp": "2026-09-02T10:06:00Z"
+    }
+  ],
+  "evidence": [
+    {
+      "turn_number": 1,
+      "phonemes": [{"sound": "dʒ", "heard_in": ["junior"], "confidence": 0.94}],
+      "speech_metrics": {"duration_ms": 14500, "words_per_minute": 138}
+    },
+    {
+      "turn_number": 2,
+      "phonemes": [{"sound": "θ", "heard_in": ["proportionally"], "confidence": 0.88}],
+      "speech_metrics": {"duration_ms": 16200, "words_per_minute": 142}
+    }
+  ],
+  "is_closing_statement": false,
+  "closing_reason": null,
+  "last_opponent_prompt": null,
+  "last_opponent_raw": null,
+  "last_latency_ms": 0.0,
+  "created_at": "2026-09-02T10:05:00Z"
+}

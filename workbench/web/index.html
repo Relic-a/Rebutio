@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rebutio Workbench · Isolated Testing & State Inspector</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 500: '#6366f1', 600: '#4f46e5' },
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    pre { white-space: pre-wrap; word-break: break-word; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
+
+  <!-- Top Navigation Header -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50 px-6 py-3.5 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20">
+        R
+      </div>
+      <div>
+        <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
+          Rebutio Workbench
+          <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-medium border border-indigo-500/30">Modular Testbed</span>
+        </h1>
+        <p class="text-xs text-slate-400">Isolated module runner & state continuity engine</p>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="flex items-center space-x-4">
+      <div class="flex items-center bg-slate-800/80 p-1 rounded-lg border border-slate-700">
+        <label class="text-xs font-medium px-2 text-slate-300 flex items-center gap-1.5 cursor-pointer">
+          <input type="checkbox" id="liveModeToggle" class="rounded bg-slate-700 border-slate-600 text-indigo-500 focus:ring-0">
+          <span>Live AI Gateway</span>
+        </label>
+      </div>
+
+      <div class="flex items-center space-x-2">
+        <select id="presetSelector" onchange="loadSelectedPreset()" class="bg-slate-800 border border-slate-700 text-xs rounded-lg px-3 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500">
+          <option value="">Load Preset State...</option>
+          <optgroup label="Topic Generator">
+            <option value="topics/standard_refutation">topics/standard_refutation</option>
+          </optgroup>
+          <optgroup label="Debate Mode">
+            <option value="debates/turn1_in_progress">debates/turn1_in_progress</option>
+            <option value="debates/turn2_in_progress">debates/turn2_in_progress</option>
+            <option value="debates/completed_strong">debates/completed_strong</option>
+            <option value="debates/completed_insufficient">debates/completed_insufficient</option>
+          </optgroup>
+          <optgroup label="Reviewer (Scorer)">
+            <option value="reviews/strong_review">reviews/strong_review</option>
+          </optgroup>
+          <optgroup label="Coach Mode">
+            <option value="coach/ready_for_opening">coach/ready_for_opening</option>
+          </optgroup>
+        </select>
+        <button onclick="exportCurrentState()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-medium rounded-lg border border-slate-700 transition">Export JSON</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Module Tabs -->
+  <div class="border-b border-slate-800 bg-slate-900/40 px-6">
+    <nav class="flex space-x-6 text-sm font-medium">
+      <button onclick="switchTab('topic')" id="tabBtn-topic" class="py-3 border-b-2 border-indigo-500 text-indigo-400 font-semibold transition">1. Topic Generator</button>
+      <button onclick="switchTab('debate')" id="tabBtn-debate" class="py-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition">2. Debate Mode</button>
+      <button onclick="switchTab('reviewer')" id="tabBtn-reviewer" class="py-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition">3. Reviewer (Scorer)</button>
+      <button onclick="switchTab('coach')" id="tabBtn-coach" class="py-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition">4. Coach Mode</button>
+    </nav>
+  </div>
+
+  <!-- Main Work Area -->
+  <main class="flex-1 p-6 max-w-7xl mx-auto w-full">
+
+    <!-- 1. TOPIC GENERATOR TAB -->
+    <div id="tab-topic" class="space-y-6">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Controls Column -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-slate-400">Generation Parameters</h2>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Target Skill</label>
+            <input type="text" id="topicSkillId" value="direct_refutation" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Difficulty</label>
+            <select id="topicDifficulty" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100">
+              <option value="gentle">Gentle</option>
+              <option value="steady" selected>Steady</option>
+              <option value="sharp">Sharp</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">User Interests (comma-separated)</label>
+            <input type="text" id="topicInterests" value="technology, careers, ethics, society" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Count</label>
+            <input type="number" id="topicCount" value="3" min="1" max="6" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100">
+          </div>
+          <button onclick="runTopicGeneration()" id="topicRunBtn" class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 font-semibold rounded-lg text-sm shadow transition">
+            Generate Topics
+          </button>
+        </div>
+
+        <!-- Output Column -->
+        <div class="md:col-span-2 space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-sm font-bold uppercase tracking-wider text-slate-400">Generated Motions</h2>
+            <span id="topicDurationBadge" class="text-xs text-slate-400 font-mono">Ready</span>
+          </div>
+          <div id="topicCardsContainer" class="space-y-3">
+            <div class="p-8 text-center text-slate-500 border border-dashed border-slate-800 rounded-xl">
+              Click "Generate Topics" or load a preset to inspect motions and prompts.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. DEBATE MODE TAB -->
+    <div id="tab-debate" class="hidden space-y-6">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Debate Meta Column -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-sm font-bold uppercase tracking-wider text-slate-400">Debate State</h2>
+            <span id="debateStatusBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 font-medium">Not Started</span>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">Topic</label>
+            <textarea id="debateTopicInput" rows="3" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-200">Generative AI will reduce junior developer job opportunities within three years.</textarea>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-400 mb-1">User Side</label>
+              <select id="debateUserSide" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200">
+                <option value="agree" selected>Agree</option>
+                <option value="disagree">Disagree</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-400 mb-1">Intensity</label>
+              <select id="debateIntensity" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200">
+                <option value="easygoing">Easygoing</option>
+                <option value="balanced" selected>Balanced</option>
+                <option value="bring_it_on">Bring it on</option>
+              </select>
+            </div>
+          </div>
+          <div class="pt-2 border-t border-slate-800 space-y-2">
+            <button onclick="sendDebateToReviewer()" id="sendToReviewerBtn" class="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-500 font-semibold rounded-lg text-xs transition flex items-center justify-center gap-1.5 shadow">
+              <span>🏆 Send State to Reviewer</span>
+            </button>
+            <button onclick="resetDebate()" class="w-full py-1.5 px-3 bg-slate-800 hover:bg-slate-700 font-medium rounded-lg text-xs text-slate-300 transition">
+              Reset Debate
+            </button>
+          </div>
+        </div>
+
+        <!-- Transcript & Turn Stepper Column -->
+        <div class="md:col-span-2 flex flex-col space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-sm font-bold uppercase tracking-wider text-slate-400">Live Turn Dialogue</h2>
+            <span id="debateTurnCountBadge" class="text-xs text-slate-400 font-mono">Turn 1 / 3</span>
+          </div>
+
+          <div id="debateTranscriptContainer" class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 min-h-[340px] max-h-[480px] overflow-y-auto">
+            <div class="text-center text-slate-500 py-12">No turns yet. Enter your opening argument below.</div>
+          </div>
+
+          <!-- Turn Input Bar -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex gap-2 items-center">
+            <input type="text" id="debateUserTextInput" placeholder="Type user argument or counterpoint..." class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500">
+            <button onclick="submitDebateTurn()" id="debateSubmitBtn" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 font-semibold rounded-lg text-sm transition">
+              Send Turn
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. REVIEWER (SCORER) TAB -->
+    <div id="tab-reviewer" class="hidden space-y-6">
+      <div class="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div>
+          <h2 class="text-base font-bold text-white flex items-center gap-2">
+            Adjudicator & Language Scorer
+            <span id="reviewerOutcomeBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700">Awaiting Evaluation</span>
+          </h2>
+          <p id="reviewerSummaryLine" class="text-xs text-slate-400 mt-0.5">Loads completed debate state and calculates rubrics, scores, and findings.</p>
+        </div>
+        <div class="flex items-center space-x-3">
+          <button onclick="runReviewer()" id="runReviewerBtn" class="py-2 px-4 bg-indigo-600 hover:bg-indigo-500 font-semibold rounded-lg text-xs shadow transition">
+            Run Reviewer
+          </button>
+          <button onclick="sendReviewToCoach()" id="sendReviewToCoachBtn" class="py-2 px-4 bg-purple-600 hover:bg-purple-500 font-semibold rounded-lg text-xs shadow transition">
+            🎓 Send to Coach
+          </button>
+        </div>
+      </div>
+
+      <!-- Evidence & Outcome Row -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="reviewerMetricsRow">
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+          <div class="text-xs text-slate-400 font-semibold uppercase">Evidence Status</div>
+          <div id="revSufficientEvidence" class="text-lg font-bold text-white mt-1">-</div>
+          <div id="revEvidenceDetail" class="text-xs text-slate-500 mt-1">0 turns · 0 words</div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+          <div class="text-xs text-slate-400 font-semibold uppercase">Mastery Stars</div>
+          <div id="revStarsDisplay" class="text-lg font-bold text-amber-400 mt-1">☆☆☆</div>
+          <div id="revStarsNote" class="text-xs text-slate-500 mt-1">-</div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+          <div class="text-xs text-slate-400 font-semibold uppercase">Debate Outcome</div>
+          <div id="revOutcomeDisplay" class="text-lg font-bold text-white mt-1">-</div>
+          <div id="revSkillDemoDisplay" class="text-xs text-slate-500 mt-1">Skill demonstrated: -</div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+          <div class="text-xs text-slate-400 font-semibold uppercase">Latency</div>
+          <div id="revDurationDisplay" class="text-lg font-mono font-bold text-indigo-400 mt-1">-</div>
+          <div class="text-xs text-slate-500 mt-1">AI adjudication time</div>
+        </div>
+      </div>
+
+      <!-- Score Cards Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-indigo-400 uppercase tracking-wider">Debate Technique</span>
+            <span id="scoreTechBadge" class="text-sm font-bold bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/30">- / 10</span>
+          </div>
+          <p id="scoreTechRubric" class="text-xs text-slate-300 leading-relaxed">-</p>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-purple-400 uppercase tracking-wider">Grammar</span>
+            <span id="scoreGramBadge" class="text-sm font-bold bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded border border-purple-500/30">- / 10</span>
+          </div>
+          <p id="scoreGramRubric" class="text-xs text-slate-300 leading-relaxed">-</p>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-emerald-400 uppercase tracking-wider">Vocabulary</span>
+            <span id="scoreVocabBadge" class="text-sm font-bold bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30">- / 10</span>
+          </div>
+          <p id="scoreVocabRubric" class="text-xs text-slate-300 leading-relaxed">-</p>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-sky-400 uppercase tracking-wider">Delivery (Spoken Audio)</span>
+            <span id="scoreDelivBadge" class="text-sm font-bold bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded border border-sky-500/30">- / 10</span>
+          </div>
+          <p id="scoreDelivRubric" class="text-xs text-slate-300 leading-relaxed">-</p>
+        </div>
+      </div>
+
+      <!-- Feedback Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <h3 class="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">Strongest Spoken Moment</h3>
+          <p id="revStrongestMoment" class="text-xs text-slate-200 leading-relaxed">-</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <h3 class="text-xs font-bold text-amber-400 uppercase tracking-wider mb-2">Highest-Value Improvement Opportunity</h3>
+          <p id="revImprovementOpportunity" class="text-xs text-slate-200 leading-relaxed">-</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. COACH MODE TAB -->
+    <div id="tab-coach" class="hidden space-y-6">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Coach Controls -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-slate-400">Coach Mode Testing</h2>
+          <div class="space-y-2">
+            <button onclick="runCoachOpening()" class="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-500 font-semibold rounded-lg text-xs transition">
+              1. Generate Opening Analysis
+            </button>
+            <button onclick="runCoachMemoryUpdate()" class="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 font-semibold rounded-lg text-xs transition text-slate-200 border border-slate-700">
+              2. Update Coach Memory Markdown
+            </button>
+          </div>
+          <div class="pt-3 border-t border-slate-800">
+            <label class="block text-xs font-semibold text-slate-400 mb-1">Quick Practice Prompts</label>
+            <div id="coachQuickRepliesList" class="space-y-1.5">
+              <button onclick="sendCoachChatPrompt('Give me a 1-minute spoken practice exercise.')" class="w-full text-left text-xs p-2 bg-slate-800/60 hover:bg-slate-800 rounded border border-slate-700/60 text-slate-300">
+                • Give me a 1-minute practice exercise
+              </button>
+              <button onclick="sendCoachChatPrompt('How should I pronounce words with voiceless th?')" class="w-full text-left text-xs p-2 bg-slate-800/60 hover:bg-slate-800 rounded border border-slate-700/60 text-slate-300">
+                • How should I pronounce voiceless 'th'?
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Coach Conversation & Memory Column -->
+        <div class="md:col-span-2 space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-sm font-bold uppercase tracking-wider text-slate-400">Coach Interactions</h2>
+            <span id="coachLatencyBadge" class="text-xs text-slate-400 font-mono">Ready</span>
+          </div>
+
+          <div id="coachChatContainer" class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 min-h-[380px] max-h-[500px] overflow-y-auto">
+            <div class="text-center text-slate-500 py-16">Click "Generate Opening Analysis" or send a practice question.</div>
+          </div>
+
+          <!-- Coach Chat Input -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex gap-2 items-center">
+            <input type="text" id="coachMessageInput" placeholder="Ask coach a strategy question or practice retry..." class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500">
+            <button onclick="sendCoachChatMessage()" class="px-5 py-2 bg-purple-600 hover:bg-purple-500 font-semibold rounded-lg text-sm transition">
+              Send to Coach
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    let currentDebateState = null;
+    let currentReviewState = null;
+    let currentCoachState = null;
+
+    function switchTab(tabId) {
+      ['topic', 'debate', 'reviewer', 'coach'].forEach(t => {
+        document.getElementById(`tab-${t}`).classList.add('hidden');
+        document.getElementById(`tabBtn-${t}`).className = 'py-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition';
+      });
+      document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+      document.getElementById(`tabBtn-${tabId}`).className = 'py-3 border-b-2 border-indigo-500 text-indigo-400 font-semibold transition';
+    }
+
+    async function loadSelectedPreset() {
+      const val = document.getElementById('presetSelector').value;
+      if (!val) return;
+      const parts = val.split('/');
+      const res = await fetch(`/api/presets/${parts[0]}/${parts[1]}`);
+      const data = await res.json();
+
+      if (parts[0] === 'debates') {
+        currentDebateState = data;
+        switchTab('debate');
+        renderDebateState();
+      } else if (parts[0] === 'reviews') {
+        currentReviewState = data;
+        switchTab('reviewer');
+        renderReviewState();
+      } else if (parts[0] === 'coach') {
+        currentCoachState = data;
+        currentDebateState = data.debate_state;
+        currentReviewState = data.review_state;
+        switchTab('coach');
+        renderCoachState();
+      } else if (parts[0] === 'topics') {
+        document.getElementById('topicSkillId').value = data.inputs.skill_id;
+        document.getElementById('topicDifficulty').value = data.inputs.difficulty;
+        document.getElementById('topicInterests').value = data.inputs.user_interests.join(', ');
+        switchTab('topic');
+      }
+    }
+
+    async function runTopicGeneration() {
+      const live = document.getElementById('liveModeToggle').checked;
+      const skill = document.getElementById('topicSkillId').value;
+      const diff = document.getElementById('topicDifficulty').value;
+      const count = parseInt(document.getElementById('topicCount').value) || 3;
+      const interests = document.getElementById('topicInterests').value.split(',').map(s => s.trim());
+
+      document.getElementById('topicRunBtn').innerText = 'Generating...';
+      const res = await fetch('/api/topics/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: { skill_id: skill, skill_name: skill.replace('_', ' '), difficulty: diff, user_interests: interests, count: count },
+          live: live
+        })
+      });
+      const data = await res.json();
+      document.getElementById('topicRunBtn').innerText = 'Generate Topics';
+      document.getElementById('topicDurationBadge').innerText = `${data.duration_ms}ms`;
+
+      const container = document.getElementById('topicCardsContainer');
+      container.innerHTML = '';
+      data.generated_topics.forEach(t => {
+        const card = document.createElement('div');
+        card.className = 'bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-start justify-between gap-4';
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs font-mono font-medium px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">${t.interest_tag || 'topic'}</span>
+              <span class="text-xs text-slate-500 font-mono">${t.estimated_difficulty || diff} · ${t.turns} turns</span>
+            </div>
+            <p class="text-sm font-semibold text-slate-100">${t.statement}</p>
+            ${t.context ? `<p class="text-xs text-slate-400 mt-1">${t.context}</p>` : ''}
+          </div>
+          <button onclick="startDebateWithTopic('${t.statement.replace(/'/g, "\\'")}')" class="shrink-0 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold rounded-lg transition">
+            Start Debate
+          </button>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function startDebateWithTopic(statement) {
+      document.getElementById('debateTopicInput').value = statement;
+      resetDebate();
+      switchTab('debate');
+    }
+
+    function resetDebate() {
+      const topic = document.getElementById('debateTopicInput').value;
+      const userSide = document.getElementById('debateUserSide').value;
+      const intensity = document.getElementById('debateIntensity').value;
+      currentDebateState = {
+        session_id: `sess-${Math.random().toString(36).substring(2, 9)}`,
+        topic: topic,
+        user_side: userSide,
+        opponent_side: userSide === 'agree' ? 'disagree' : 'agree',
+        skill_id: 'direct_refutation',
+        skill_name: 'Direct Refutation',
+        difficulty: 'steady',
+        intensity: intensity,
+        total_turns: 3,
+        current_turn: 1,
+        status: 'not_started',
+        turns: [],
+        evidence: []
+      };
+      renderDebateState();
+    }
+
+    async function submitDebateTurn() {
+      const text = document.getElementById('debateUserTextInput').value.trim();
+      if (!text) return;
+      if (!currentDebateState) resetDebate();
+
+      const live = document.getElementById('liveModeToggle').checked;
+      document.getElementById('debateSubmitBtn').innerText = 'Thinking...';
+      document.getElementById('debateUserTextInput').value = '';
+
+      const res = await fetch('/api/debate/step', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          debate_state: currentDebateState,
+          user_text: text,
+          live: live
+        })
+      });
+      const data = await res.json();
+      currentDebateState = data.debate_state;
+      document.getElementById('debateSubmitBtn').innerText = 'Send Turn';
+      renderDebateState();
+    }
+
+    function renderDebateState() {
+      if (!currentDebateState) return;
+      document.getElementById('debateTopicInput').value = currentDebateState.topic;
+      document.getElementById('debateUserSide').value = currentDebateState.user_side;
+      document.getElementById('debateStatusBadge').innerText = currentDebateState.status.toUpperCase();
+      document.getElementById('debateTurnCountBadge').innerText = `Turn ${currentDebateState.current_turn} / ${currentDebateState.total_turns}`;
+
+      const container = document.getElementById('debateTranscriptContainer');
+      container.innerHTML = '';
+      if (!currentDebateState.turns || currentDebateState.turns.length === 0) {
+        container.innerHTML = '<div class="text-center text-slate-500 py-12">No turns yet. Enter your opening argument below.</div>';
+        return;
+      }
+
+      currentDebateState.turns.forEach(t => {
+        const isUser = t.speaker === 'user';
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `flex flex-col ${isUser ? 'items-end' : 'items-start'}`;
+        msgDiv.innerHTML = `
+          <div class="text-[10px] text-slate-500 font-mono mb-1 uppercase">${isUser ? 'You (User)' : 'Opponent Rebutio'} · Turn ${t.turn_number}</div>
+          <div class="max-w-xl rounded-2xl p-3.5 text-xs leading-relaxed ${isUser ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-slate-800 text-slate-100 rounded-tl-none border border-slate-700'}">
+            ${t.text}
+          </div>
+        `;
+        container.appendChild(msgDiv);
+      });
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function sendDebateToReviewer() {
+      if (!currentDebateState) return;
+      switchTab('reviewer');
+      runReviewer();
+    }
+
+    async function runReviewer() {
+      if (!currentDebateState) {
+        alert('Please run or load a debate state first.');
+        return;
+      }
+      const live = document.getElementById('liveModeToggle').checked;
+      document.getElementById('runReviewerBtn').innerText = 'Adjudicating...';
+
+      const res = await fetch('/api/review/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          debate_state: currentDebateState,
+          live: live
+        })
+      });
+      currentReviewState = await res.json();
+      document.getElementById('runReviewerBtn').innerText = 'Run Reviewer';
+      renderReviewState();
+    }
+
+    function renderReviewState() {
+      if (!currentReviewState) return;
+      const r = currentReviewState;
+      const ev = r.evidence_assessment;
+
+      document.getElementById('reviewerOutcomeBadge').innerText = r.outcome.toUpperCase();
+      document.getElementById('revSufficientEvidence').innerText = ev.has_sufficient_evidence ? 'Sufficient' : 'Insufficient';
+      document.getElementById('revEvidenceDetail').innerText = `${ev.user_turns_count} turns · ${ev.total_user_words} words`;
+
+      document.getElementById('revStarsDisplay').innerText = '★'.repeat(r.mastery_stars) + '☆'.repeat(3 - r.mastery_stars);
+      document.getElementById('revStarsNote').innerText = r.mastery_note || 'Standard completion';
+      document.getElementById('revOutcomeDisplay').innerText = r.outcome.replace('_', ' ').toUpperCase();
+      document.getElementById('revSkillDemoDisplay').innerText = `Skill demonstrated: ${r.skill_demonstrated}`;
+      document.getElementById('revDurationDisplay').innerText = `${r.duration_ms}ms`;
+
+      if (r.score_technique) {
+        document.getElementById('scoreTechBadge').innerText = `${r.score_technique.score ?? 'N/A'} / 10`;
+        document.getElementById('scoreTechRubric').innerText = r.score_technique.rubric;
+      }
+      if (r.score_grammar) {
+        document.getElementById('scoreGramBadge').innerText = `${r.score_grammar.score ?? 'N/A'} / 10`;
+        document.getElementById('scoreGramRubric').innerText = r.score_grammar.rubric;
+      }
+      if (r.score_vocabulary) {
+        document.getElementById('scoreVocabBadge').innerText = `${r.score_vocabulary.score ?? 'N/A'} / 10`;
+        document.getElementById('scoreVocabRubric').innerText = r.score_vocabulary.rubric;
+      }
+      if (r.score_delivery) {
+        document.getElementById('scoreDelivBadge').innerText = `${r.score_delivery.score ?? 'N/A'} / 10`;
+        document.getElementById('scoreDelivRubric').innerText = r.score_delivery.rubric;
+      }
+
+      document.getElementById('revStrongestMoment').innerText = r.strongest_moment || 'N/A';
+      document.getElementById('revImprovementOpportunity').innerText = r.improvement_opportunity || 'N/A';
+    }
+
+    function sendReviewToCoach() {
+      if (!currentReviewState) return;
+      currentCoachState = {
+        user_id: 'workbench-test-user',
+        coach_memory_markdown: '# Rebutio Coach Memory\n\n## User Preferences & Goals\n- Concise arguments\n\n## Historical Summary\n- Strong logic structure\n\n## Recent Debates\n',
+        debate_state: currentDebateState,
+        review_state: currentReviewState,
+        thread_messages: []
+      };
+      switchTab('coach');
+      runCoachOpening();
+    }
+
+    async function runCoachOpening() {
+      if (!currentCoachState) {
+        if (currentReviewState && currentDebateState) {
+          sendReviewToCoach();
+          return;
+        }
+        alert('Please run Reviewer first or load coach/ready_for_opening preset.');
+        return;
+      }
+      const live = document.getElementById('liveModeToggle').checked;
+      const res = await fetch('/api/coach/opening', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          coach_state: currentCoachState,
+          live: live
+        })
+      });
+      const data = await res.json();
+      currentCoachState = data.coach_state;
+      renderCoachState();
+    }
+
+    async function sendCoachChatMessage() {
+      const text = document.getElementById('coachMessageInput').value.trim();
+      if (!text) return;
+      document.getElementById('coachMessageInput').value = '';
+      sendCoachChatPrompt(text);
+    }
+
+    async function sendCoachChatPrompt(promptText) {
+      if (!currentCoachState) {
+        alert('Please load coach preset or generate opening analysis first.');
+        return;
+      }
+      const live = document.getElementById('liveModeToggle').checked;
+      const res = await fetch('/api/coach/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          coach_state: currentCoachState,
+          message: promptText,
+          live: live
+        })
+      });
+      const data = await res.json();
+      currentCoachState = data.coach_state;
+      renderCoachState();
+    }
+
+    async function runCoachMemoryUpdate() {
+      if (!currentCoachState) return;
+      const live = document.getElementById('liveModeToggle').checked;
+      const res = await fetch('/api/coach/memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          coach_state: currentCoachState,
+          live: live
+        })
+      });
+      const data = await res.json();
+      currentCoachState = data.coach_state;
+      alert(`Coach memory updated! Added +${data.diff.lines_added} lines.`);
+      renderCoachState();
+    }
+
+    function renderCoachState() {
+      if (!currentCoachState) return;
+      const container = document.getElementById('coachChatContainer');
+      container.innerHTML = '';
+
+      currentCoachState.thread_messages.forEach(m => {
+        const isCoach = m.sender === 'coach';
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `flex flex-col ${isCoach ? 'items-start' : 'items-end'}`;
+        msgDiv.innerHTML = `
+          <div class="text-[10px] text-slate-500 font-mono mb-1 uppercase">${isCoach ? 'Rebutio Coach' : 'You (User)'}</div>
+          <div class="max-w-xl rounded-2xl p-3.5 text-xs leading-relaxed ${isCoach ? 'bg-slate-800 text-slate-100 rounded-tl-none border border-slate-700' : 'bg-purple-600 text-white rounded-tr-none'}">
+            ${m.text}
+          </div>
+        `;
+        container.appendChild(msgDiv);
+      });
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function exportCurrentState() {
+      const stateToExport = currentReviewState || currentDebateState || currentCoachState;
+      if (!stateToExport) {
+        alert('No active state to export.');
+        return;
+      }
+      const blob = new Blob([JSON.stringify(stateToExport, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `rebutio_state_${Date.now()}.json`;
+      a.click();
+    }
+  </script>
+</body>
+</html>

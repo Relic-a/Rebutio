@@ -1,0 +1,23 @@
+{
+  "inputs": {
+    "skill_id": "direct_refutation",
+    "skill_name": "Direct Refutation",
+    "difficulty": "steady",
+    "user_interests": ["technology", "society", "ethics", "careers"],
+    "recent_topics": [
+      "Remote work should be a legal right for all tech workers."
+    ],
+    "compact_speech_findings": {
+      "recurring_pronunciation": [
+        {"sound": "th", "heard_in": ["think", "through"], "occurrences": 3}
+      ],
+      "fluency_summary": "Intelligibility high with 1.2s thinking pause before main claims."
+    },
+    "count": 3
+  },
+  "generated_topics": [],
+  "prompt_messages": null,
+  "raw_response": null,
+  "duration_ms": 0.0,
+  "created_at": "2026-09-02T10:00:00Z"
+}

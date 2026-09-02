@@ -1,0 +1,86 @@
+{
+  "session_id": "sess-preset-completed-strong",
+  "topic": "Generative AI will reduce junior developer job opportunities within the next three years.",
+  "user_side": "agree",
+  "opponent_side": "disagree",
+  "skill_id": "direct_refutation",
+  "skill_name": "Direct Refutation",
+  "difficulty": "steady",
+  "evidence_assessment": {
+    "has_sufficient_evidence": true,
+    "has_sufficient_delivery_evidence": true,
+    "user_turns_count": 3,
+    "substantive_turns_count": 3,
+    "total_user_words": 118,
+    "insufficient_reason": null
+  },
+  "outcome": "user_win",
+  "mastery_stars": 3,
+  "completed": true,
+  "skill_demonstrated": true,
+  "mastery_note": "Consistently dismantled the opponent's core premises regarding budget growth and mentorship pipelines.",
+  "skill_summary": "Exemplary demonstration of direct refutation across all three turns.",
+  "score_technique": {
+    "score": 9,
+    "label": "Debate technique",
+    "rubric": "Targeted the economic assumption in turn 2 and synthesized the apprenticeship problem in the closing turn."
+  },
+  "score_grammar": {
+    "score": 9,
+    "label": "Grammar",
+    "rubric": "Complex conditional structures delivered with syntactic precision under pressure."
+  },
+  "score_vocabulary": {
+    "score": 8,
+    "label": "Vocabulary",
+    "rubric": "Effective domain terminology including 'apprenticeship gap', 'proportionally', and 'review bottlenecks'."
+  },
+  "score_delivery": {
+    "score": 8,
+    "label": "Delivery",
+    "rubric": "Measured cadence averaging 138 WPM with clean transitions between points."
+  },
+  "strongest_moment": "Turn 2: Direct challenge to the budget elasticity premise without hedging.",
+  "improvement_opportunity": "Smooth out the consonant transition on 'proportionally' to avoid slight dental fricative softening.",
+  "argument_feedback": {
+    "strength": "Refusing to allow the opponent to pivot from budget constraints to theoretical software demand.",
+    "improvement": "Offer a brief quantitative example of review bottlenecks to lock the final argument down.",
+    "insight": "The debate turned decisively on who could realistically explain how juniors become seniors."
+  },
+  "language_feedback": {
+    "pronunciation": [
+      {
+        "sound": "θ",
+        "heard_in": ["proportionally", "therefore"],
+        "note": "Voiceless dental fricative slightly softened towards /s/.",
+        "occurrences": 2,
+        "severity": "minor",
+        "confidence": 0.88,
+        "reportable": true
+      }
+    ],
+    "fluency": {
+      "summary": "Confident pacing across exchanges with negligible hesitation.",
+      "trend": "improving",
+      "score": 88
+    },
+    "grammar": {
+      "summary": "Clean sentence construction across turns.",
+      "recurring_pattern": null
+    },
+    "vocabulary": {
+      "examples": ["apprenticeship gap", "constrained budgets"],
+      "recommendations": []
+    },
+    "clarity": {
+      "summary": "Crisp logic chain easily followed by the adjudicator.",
+      "score": 92
+    }
+  },
+  "raw_reviewer_response": null,
+  "raw_language_response": null,
+  "prompt_messages_reviewer": null,
+  "prompt_messages_language": null,
+  "duration_ms": 2450.0,
+  "created_at": "2026-09-02T10:08:00Z"
+}
