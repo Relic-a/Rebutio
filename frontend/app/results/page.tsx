@@ -7,6 +7,7 @@ import { Button } from "@/components/shared/Button";
 import { appService } from "@/lib/api";
 import { useStore } from "@/lib/state/store";
 import type { DebateReview } from "@/lib/types";
+import { PronunciationText } from "@/components/coach/PronunciationText";
 
 export default function ResultsPage() {
   return (
@@ -65,9 +66,9 @@ function Results() {
   const outcomeColor =
     r.outcome === "user_win" ? "bg-amber-soft text-amber-900 border-amber/30" : r.outcome === "opponent_win" ? "bg-coral-soft text-coral border-coral/30" : "bg-rally-mist text-rally-deep border-rally/30";
 
-  // 4 Integer Scores
-  const scoreTechnique = r.scoreTechnique?.score ?? 0;
-  const rubricTechnique = r.scoreTechnique?.rubric ?? r.argumentFeedback?.strength ?? "Directly challenged the opponent's core premise.";
+  // Spoken-language scores
+  const scoreClarity = r.languageFeedback?.clarity?.score ?? 0;
+  const rubricClarity = r.languageFeedback?.clarity?.summary ?? "How easily a listener could follow your spoken ideas.";
 
   const scoreGrammar = r.scoreGrammar?.score ?? 0;
   const rubricGrammar = r.scoreGrammar?.rubric ?? r.languageFeedback?.grammar?.summary ?? "Clean grammatical structures under live pressure.";
@@ -78,8 +79,9 @@ function Results() {
   const scoreDelivery = r.scoreDelivery?.score ?? 0;
   const rubricDelivery = r.scoreDelivery?.rubric ?? r.languageFeedback?.fluency?.summary ?? "Confident delivery with steady pace.";
 
-  const strongestMoment = r.strongestMoment || r.argumentFeedback?.strength || "You directly challenged their central premise.";
-  const improvementOpportunity = r.improvementOpportunity || r.argumentFeedback?.improvement || "Lead with your main point immediately in your first sentence.";
+  const pronunciationFindings = r.languageFeedback?.pronunciation ?? [];
+  const strongestMoment = r.languageFeedback?.clarity?.summary || r.languageFeedback?.grammar?.summary || r.languageFeedback?.vocabulary?.summary || r.strongestMoment || "Your speech stayed understandable through the exchange.";
+  const improvementOpportunity = pronunciationFindings[0]?.note || r.languageFeedback?.fluency?.summary || r.languageFeedback?.grammar?.summary || r.improvementOpportunity || "Keep your next answer short and easy to say aloud.";
 
   return (
     <main className="mx-auto min-h-dvh w-full max-w-md px-5 py-8 bg-parchment text-ink flex flex-col pb-16">
@@ -90,7 +92,7 @@ function Results() {
         </span>
 
         <h1 className="mt-3 font-display text-2xl font-black tracking-tight text-ink">
-          Debate Summary
+          Speaking Review
         </h1>
         <p className="mt-1 text-xs text-ink-soft max-w-xs mx-auto truncate font-medium">
           {r.topic}
@@ -109,7 +111,7 @@ function Results() {
         </div>
       </motion.div>
 
-      {/* 2. 4 Integer Scores out of 10 */}
+      {/* 2. Spoken-language scores */}
       <motion.section
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
@@ -117,19 +119,19 @@ function Results() {
         className="mt-6 space-y-3"
       >
         <h2 className="text-xs font-bold uppercase tracking-wider text-ink-soft">
-          Performance Scores
+          Spoken English
         </h2>
 
         <div className="grid grid-cols-2 gap-2.5">
-          {/* Technique */}
+          {/* Clarity */}
           <div className="rounded-2xl bg-white p-3.5 border border-ink/5 shadow-sm">
             <div className="flex items-baseline justify-between">
-              <span className="text-xs font-bold text-ink">Technique</span>
+              <span className="text-xs font-bold text-ink">Clarity</span>
               <span className="font-mono text-lg font-black text-rally">
-                {scoreTechnique > 0 ? scoreTechnique : "—"}{scoreTechnique > 0 && <span className="text-xs text-ink-soft">/10</span>}
+                {scoreClarity > 0 ? scoreClarity : "—"}{scoreClarity > 0 && <span className="text-xs text-ink-soft">/10</span>}
               </span>
             </div>
-            <p className="mt-1.5 text-[11px] text-ink-soft leading-tight line-clamp-2">{rubricTechnique}</p>
+            <p className="mt-1.5 text-[11px] text-ink-soft leading-tight line-clamp-2">{rubricClarity}</p>
           </div>
 
           {/* Grammar */}
@@ -167,7 +169,33 @@ function Results() {
         </div>
       </motion.section>
 
-      {/* 3. Standout Moments (1 Strongest + 1 Improvement) */}
+      {pronunciationFindings.length > 0 && (
+        <motion.section
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.22 }}
+          className="mt-5 rounded-2xl border border-rally/20 bg-white p-4 shadow-sm"
+        >
+          <h2 className="text-xs font-bold uppercase tracking-wider text-rally-deep">Pronunciation to practice</h2>
+          <div className="mt-3 space-y-3">
+            {pronunciationFindings.slice(0, 4).map((finding, index) => {
+              const practiceWord = finding.heardIn?.[0] || finding.sound;
+              return (
+                <div key={index} className="rounded-xl bg-rally-mist/50 p-3">
+                  <PronunciationText
+                    text={`[[pronounce:${practiceWord}]]`}
+                    className="text-sm font-bold text-rally-deep"
+                  />
+                  <p className="mt-1 text-xs leading-relaxed text-ink-soft">{finding.note}</p>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-xs text-ink-soft">Open Coach, listen to each word, then send a voice attempt for fresh phoneme feedback.</p>
+        </motion.section>
+      )}
+
+      {/* 3. Language highlights */}
       <motion.section
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
@@ -180,10 +208,10 @@ function Results() {
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
               <polyline points="22 4 12 14.01 9 11.01" />
             </svg>
-            <span>Strongest Moment</span>
+            <span>What Worked in Your Speech</span>
           </div>
           <p className="mt-1.5 text-xs font-medium text-ink leading-relaxed">
-            {strongestMoment}
+            <PronunciationText text={strongestMoment} className="whitespace-pre-wrap" />
           </p>
         </div>
 
@@ -194,10 +222,10 @@ function Results() {
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
-            <span>Primary Focus for Next Time</span>
+            <span>Primary Language Focus</span>
           </div>
           <p className="mt-1.5 text-xs font-medium text-ink leading-relaxed">
-            {improvementOpportunity}
+            <PronunciationText text={improvementOpportunity} className="whitespace-pre-wrap" />
           </p>
         </div>
       </motion.section>
@@ -216,7 +244,7 @@ function Results() {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
           </svg>
-          <span>Review with my coach</span>
+          <span>Practice with my language coach</span>
         </button>
 
         {/* Secondary Actions */}
@@ -280,7 +308,7 @@ function Results() {
           onClick={() => setDisagreeOpen((o) => !o)}
           className="text-[11px] font-semibold text-ink-soft hover:underline"
         >
-          Disagree with this adjudication?
+          Disagree with this review?
         </button>
 
         {disagreeOpen && (
