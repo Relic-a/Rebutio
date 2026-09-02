@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.dependencies import get_current_user
@@ -21,6 +21,7 @@ from backend.app.persistence.repositories import (
     DebateSessionRepository,
     UserRepository,
 )
+from backend.app.services.ai.gateway import ai_gateway
 from backend.app.services.coach.engine import CoachEngine, coach_engine
 from backend.app.services.privacy.encryption import encryptor
 
@@ -259,6 +260,27 @@ async def send_coach_audio_message(
     except Exception as e:
         logger.error("coach.audio_message_failed", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to process audio message")
+
+
+@router.get("/pronunciation")
+async def get_pronunciation_audio(
+    text: str,
+    user: User = Depends(get_current_user),
+):
+    """Return a short professional TTS pronunciation for an inline coach tag."""
+    pronunciation_text = " ".join(text.strip().split())
+    if not pronunciation_text or len(pronunciation_text) > 60:
+        raise HTTPException(status_code=422, detail="Pronunciation text must be between 1 and 60 characters")
+
+    audio_bytes = await ai_gateway.synthesize_speech(pronunciation_text)
+    if not audio_bytes:
+        raise HTTPException(status_code=503, detail="Pronunciation audio is temporarily unavailable")
+
+    return Response(
+        content=audio_bytes,
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
 
 
 @router.post("/memory/correction")
