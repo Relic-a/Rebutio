@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { appService, getAuthenticatedMediaBlobUrl } from "@/lib/api";
 import { capture } from "@/lib/media/capture";
 import { logger } from "@/lib/logger";
+import { PronunciationText } from "@/components/coach/PronunciationText";
 import type { AudioEvidenceCard, CoachMessage, CoachThreadDetail, QuickReply } from "@/lib/types";
 
 export default function SessionCoachPage() {
@@ -260,18 +261,16 @@ export default function SessionCoachPage() {
                         <span>Debate Opening Analysis</span>
                       </div>
 
-                      <p className="text-sm font-semibold text-ink leading-relaxed">
-                        {m.openingAnalysis.overallAssessment}
-                      </p>
+                      <PronunciationText text={m.openingAnalysis.overallAssessment} className="text-sm font-semibold text-ink leading-relaxed whitespace-pre-wrap" />
 
                       <div className="grid grid-cols-1 gap-2 pt-1">
                         <div className="rounded-xl bg-rally-mist/50 p-2.5 text-xs">
                           <span className="font-bold text-rally-deep">Standout Strength: </span>
-                          <span className="text-ink">{m.openingAnalysis.mostImportantStrength}</span>
+                          <PronunciationText text={m.openingAnalysis.mostImportantStrength} className="inline text-ink" />
                         </div>
                         <div className="rounded-xl bg-amber-soft/50 p-2.5 text-xs">
                           <span className="font-bold text-amber-900">Highest-Value Growth: </span>
-                          <span className="text-ink">{m.openingAnalysis.highestValueImprovement}</span>
+                          <PronunciationText text={m.openingAnalysis.highestValueImprovement} className="inline text-ink" />
                         </div>
                       </div>
 
@@ -298,7 +297,11 @@ export default function SessionCoachPage() {
                             : "bg-rally text-white rounded-br-sm shadow"
                         }`}
                       >
-                        <p className="whitespace-pre-wrap">{m.text}</p>
+                        {isCoach ? (
+                          <PronunciationText text={m.text} className="whitespace-pre-wrap" />
+                        ) : (
+                          <p className="whitespace-pre-wrap">{m.text}</p>
+                        )}
 
                         {/* Audio recording badge if user sent audio */}
                         {m.messageType === "audio" && (
