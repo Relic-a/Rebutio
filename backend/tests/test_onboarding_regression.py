@@ -59,7 +59,7 @@ async def test_onboarding_opening_turn_regression():
         assert spar_resp.status_code == 200
         spar_data = spar_resp.json()
         session_id = spar_data["session"]["id"]
-        assert spar_data["session"]["totalUserTurns"] == 3
+        assert spar_data["session"]["totalUserTurns"] >= 20
 
         # 2. Submit First User Turn
         user_text = "I believe social media has made friendships worse because superficial likes replace deep conversations."
@@ -213,8 +213,8 @@ async def test_multi_turn_spar_history_propagation_e2e():
     properly receives all preceding user and opponent turns.
     """
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        # Start Onboarding Debate
-        start_resp = await client.post("/api/debates/start", json={"side": "agree", "onboarding": True})
+        # Start Onboarding Debate with 3 turns hard limit for test
+        start_resp = await client.post("/api/debates/start", json={"side": "agree", "onboarding": True, "totalTurns": 3})
         assert start_resp.status_code == 200
         session_id = start_resp.json()["session"]["id"]
 
@@ -265,4 +265,52 @@ async def test_multi_turn_spar_history_propagation_e2e():
         assert "College wastes time and money." in t2_msgs[1]["content"]
         assert t2_msgs[2]["role"] == "assistant"
         assert "Proof and credentials can be gotten via portfolio faster." in t2_msgs[3]["content"]
+
+
+@pytest.mark.asyncio
+async def test_model_driven_debate_conclusion():
+    """
+    Verifies that the debate opponent model can conclude the debate at any point
+    by emitting [CONCLUDE_DEBATE], returning its closing remarks and finishing the debate cleanly.
+    """
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Start open-ended debate (no small hard turn limit, defaults to 20)
+        start_resp = await client.post("/api/debates/start", json={"side": "agree"})
+        assert start_resp.status_code == 200
+        session_id = start_resp.json()["session"]["id"]
+        assert start_resp.json()["session"]["totalUserTurns"] >= 20
+
+        # Turn 1: Opponent continues normally
+        with patch.object(
+            ai_gateway,
+            "generate_debate_response",
+            return_value="I disagree. A degree still provides unmatched career acceleration.",
+        ):
+            t1_resp = await client.post(
+                f"/api/sessions/{session_id}/turns",
+                data={"transcript": "College is overpriced for most fields.", "turn_index": 1},
+            )
+            assert t1_resp.status_code == 200
+            t1_data = t1_resp.json()
+            assert t1_data["finished"] is False
+            assert t1_data["opponentTurn"]["text"] == "I disagree. A degree still provides unmatched career acceleration."
+            assert t1_data["nextUserTurnNumber"] == 2
+
+        # Turn 2: Opponent decides the clash is resolved and concludes with [CONCLUDE_DEBATE]
+        concluding_reply = (
+            "We have reached the fundamental tradeoff between immediate work experience and long-term credentials. "
+            "Neither side will yield further, so that is where we rest the debate.\n[CONCLUDE_DEBATE]"
+        )
+        with patch.object(ai_gateway, "generate_debate_response", return_value=concluding_reply):
+            t2_resp = await client.post(
+                f"/api/sessions/{session_id}/turns",
+                data={"transcript": "Self-taught developers and trades show alternative paths work just as well.", "turn_index": 2},
+            )
+            assert t2_resp.status_code == 200
+            t2_data = t2_resp.json()
+            assert t2_data["finished"] is True
+            # Opponent closing turn is present and tag is cleanly stripped
+            assert t2_data["opponentTurn"] is not None
+            assert "[CONCLUDE_DEBATE]" not in t2_data["opponentTurn"]["text"]
+            assert "Neither side will yield further" in t2_data["opponentTurn"]["text"]
 

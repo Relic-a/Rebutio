@@ -6,12 +6,29 @@ import { AnimatePresence, motion } from "framer-motion";
 import { TabBar } from "@/components/shared/TabBar";
 import { appService } from "@/lib/api";
 import { logger } from "@/lib/logger";
+import { mockProgressStats } from "@/lib/mock/fixtures";
 import type { CoachHomeData, QuickReply } from "@/lib/types";
+
+const defaultCoachData: CoachHomeData = {
+  activeFocus: "Isolating opponent assumptions directly",
+  focusDetails: "Observed across your recent debates. Moving towards consistent mastery.",
+  progressSummary: mockProgressStats,
+  presetQuestions: [
+    { label: "Refutations", prompt: "How can I make my refutations punchier?" },
+    { label: "Hesitation", prompt: "How do I cut down pauses before speaking?" },
+    { label: "Concessions", prompt: "When should I concede without losing ground?" },
+    { label: "Structure", prompt: "Give me a framework for 30-second spoken turns." },
+  ],
+  recentDebateThreads: [],
+  generalThreads: [],
+};
+
+let cachedCoachHome: CoachHomeData | null = null;
 
 export default function CoachHomePage() {
   const router = useRouter();
-  const [data, setData] = useState<CoachHomeData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<CoachHomeData>(() => cachedCoachHome || defaultCoachData);
+  const [loading, setLoading] = useState(false);
   const [customPrompt, setCustomPrompt] = useState("");
   const [isStarting, setIsStarting] = useState(false);
   const [correctionModalOpen, setCorrectionModalOpen] = useState(false);
@@ -22,12 +39,13 @@ export default function CoachHomePage() {
     appService
       .getCoachHome()
       .then((res) => {
-        setData(res);
-        setLoading(false);
+        if (res) {
+          cachedCoachHome = res;
+          setData(res);
+        }
       })
       .catch((err) => {
         logger.error("coach.home_load_failed", {}, err);
-        setLoading(false);
       });
   }, []);
 

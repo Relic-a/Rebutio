@@ -106,6 +106,7 @@ class StartDebateRequestSchema(BaseModel):
     side: Literal["agree", "disagree"] = "agree"
     onboarding: bool = False
     interests: Optional[List[str]] = None
+    totalTurns: Optional[int] = None
 
 
 class StartDebateResponseSchema(BaseModel):

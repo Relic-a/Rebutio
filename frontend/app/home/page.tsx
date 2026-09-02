@@ -20,7 +20,10 @@ export default function HomePage() {
   const xp = useStore((s) => s.xp);
   const streakDays = useStore((s) => s.streakDays);
   const starsByNodeId = useStore((s) => s.starsByNodeId);
-  const [dailyTopic, setDailyTopic] = useState<(typeof mockDebateTopics)[number] | null>(null);
+  const [dailyTopic, setDailyTopic] = useState<(typeof mockDebateTopics)[number]>(() => {
+    const day = new Date().getDate();
+    return mockDebateTopics[day % mockDebateTopics.length];
+  });
   const [activeSession, setActiveSession] = useState<DebateSession | null>(null);
 
   useEffect(() => {
@@ -32,15 +35,19 @@ export default function HomePage() {
           setActiveSession(b.activeSession);
         }
       }
-    }).catch(() => router.replace("/onboarding"));
+    }).catch(() => {
+      if (!onboarded) router.replace("/onboarding");
+    });
 
     appService.getDebateChoices().then((t) => {
-      const day = new Date().getDate();
-      setDailyTopic(t[day % t.length]);
-    });
+      if (t && t.length > 0) {
+        const day = new Date().getDate();
+        setDailyTopic(t[day % t.length]);
+      }
+    }).catch(() => {});
   }, [onboarded, router]);
 
-  if (!onboarded || !dailyTopic) return <main className="flex min-h-dvh items-center justify-center" />;
+  if (!onboarded) return <main className="flex min-h-dvh items-center justify-center" />;
 
   const path = getEffectivePath(starsByNodeId);
   const current = path.nodes.find((n) => n.status === "current") ?? path.nodes[3];
@@ -61,7 +68,7 @@ export default function HomePage() {
             <div className="flex items-center justify-between">
               <span className="rounded-full bg-amber-200 px-3 py-1 text-xs font-bold uppercase tracking-wider text-amber-900">In Progress</span>
               <span className="text-xs font-semibold text-amber-800">
-                Turn {activeSession.currentTurn} of {activeSession.totalUserTurns}
+                Turn {activeSession.currentTurn}
               </span>
             </div>
             <h2 className="mt-3 font-display text-xl font-extrabold leading-snug text-amber-950">{activeSession.topic}</h2>

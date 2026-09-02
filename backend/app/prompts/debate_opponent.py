@@ -38,8 +38,21 @@ WHEN THE USER ASKS A QUESTION:
 - Do not dodge a hard question with a different question.
 - If you genuinely cannot support a factual answer confidently, say what your argument does and does not depend on, then press the reasoning you can defend.
 
+CONCLUDING THE DEBATE:
+- You have the authority to decide when the debate has reached a natural conclusion and should end.
+- Conclude the debate when:
+  1. Both sides have had multiple turns to articulate and defend their cases, and the central clash has been thoroughly explored (typically after 3 or more turns of substantial debate).
+  2. The user delivers a closing argument, rests their case, or concedes.
+  3. The arguments have reached a natural resolution or impasse where further turns would be repetitive.
+- DO NOT conclude prematurely on Turn 1 or after only a single superficial exchange. Spar vigorously first.
+- When you decide to conclude the debate:
+  Deliver your final closing remarks directly to the user (2 to 4 concise spoken sentences summing up your stance or offering a final challenge).
+  At the very end of your response, on a new line, append the exact marker:
+  [CONCLUDE_DEBATE]
+- When the debate is actively continuing, do NOT output [CONCLUDE_DEBATE].
+
 OUTPUT FORMAT:
-Output ONLY the direct spoken debate response as plain text.
+Output ONLY the direct spoken debate response as plain text (and the [CONCLUDE_DEBATE] marker if concluding).
 Do NOT output JSON, markdown, bullet points, headings, stage directions, quotation marks, or meta commentary.
 """
 
@@ -81,7 +94,8 @@ def build_opponent_prompt(
     intensity: str,
     turn_history: List[dict],
     current_turn_number: int = 1,
-    total_turns: int = 4,
+    total_turns: int = 20,
+    is_closing_statement: bool = False,
 ) -> List[dict]:
     intensity_note = INTENSITY_GUIDES.get(intensity, INTENSITY_GUIDES["balanced"])
     skill_note = SKILL_PRESSURE_GUIDES.get(
@@ -92,16 +106,22 @@ def build_opponent_prompt(
     if current_turn_number <= 1:
         progression_note = (
             "Conversation stage: Opening clash. Establish the strongest reason for your side and engage the user's first real claim. "
-            "Do not try to resolve every issue at once."
+            "Do not try to resolve every issue at once. Spar vigorously; do not conclude yet."
         )
-    elif total_turns > 1 and current_turn_number >= total_turns - 1:
+    elif is_closing_statement:
         progression_note = (
-            "Conversation stage: Final opponent challenge before the user's closing turn. Return to the most decisive unresolved clash and make it hard to ignore. "
-            "Do not summarize the entire debate."
+            "Conversation stage: Final closing rebuttal. The user has delivered a closing argument or rested their case. "
+            "Deliver your final closing remarks directly to the user, and append [CONCLUDE_DEBATE] on a new line to conclude the debate."
+        )
+    elif current_turn_number >= total_turns - 1:
+        progression_note = (
+            "Conversation stage: Final safety turn. The spar has reached its maximum round limit. "
+            "Deliver your final closing remarks and append [CONCLUDE_DEBATE] on a new line to conclude the debate."
         )
     else:
         progression_note = (
-            "Conversation stage: Active exchange. Build from what was actually said, answer live questions, and deepen the most important unresolved clash rather than starting a new debate each turn."
+            "Conversation stage: Active exchange. Build from what was actually said, answer live questions, and deepen the most important unresolved clash. "
+            "If the debate has reached a complete, satisfying resolution where both sides have fully argued the motion, deliver your final remarks and append [CONCLUDE_DEBATE] on a new line. Otherwise, continue sparring normally without the tag."
         )
 
     system_content = f"""{OPPONENT_SYSTEM_PROMPT}

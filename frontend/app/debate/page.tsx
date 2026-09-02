@@ -75,8 +75,8 @@ function DebateLoader() {
     }
   }
 
-  function finish(review: DebateReview) {
-    useStore.getState().applyReview(review);
+  function finish(review: DebateReview, turns?: Array<{ speaker: string; text: string }>) {
+    useStore.getState().applyReview(review, { turns });
     router.replace("/results");
   }
 

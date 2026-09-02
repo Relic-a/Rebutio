@@ -3,6 +3,7 @@ from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.config import settings
 from backend.app.api.dependencies import get_current_user
 from backend.app.domain.curriculum import get_current_skill_for_user, get_skill
 from backend.app.domain.topics import TopicInventoryService
@@ -66,14 +67,14 @@ async def start_debate(
         )
         skill = get_skill(skill_id)
         difficulty = "gentle"
-        turns = 3
+        turns = req.totalTurns or getattr(settings, "DEBATE_SAFETY_MAX_TURNS", 20)
         reminder = skill.reminder
     elif topic_record:
         topic_id = topic_record.topic_id
         topic_text = topic_record.topic_text
         skill = get_skill(topic_record.skill_id)
         difficulty = topic_record.difficulty
-        turns = topic_record.turns
+        turns = req.totalTurns or topic_record.turns or getattr(settings, "DEBATE_SAFETY_MAX_TURNS", 20)
         reminder = topic_record.reminder or skill.reminder
     else:
         # Check if topic available in inventory
@@ -84,14 +85,14 @@ async def start_debate(
             topic_text = inv_t.topic_text
             skill = get_skill(inv_t.skill_id)
             difficulty = inv_t.difficulty
-            turns = inv_t.turns
+            turns = req.totalTurns or getattr(settings, "DEBATE_SAFETY_MAX_TURNS", 20)
             reminder = inv_t.reminder or skill.reminder
         else:
             skill = default_skill
             topic_id = req.topicId or f"topic-{uuid.uuid4().hex[:6]}"
             topic_text = "College is no longer worth the financial cost." if not req.topicId else req.topicId
             difficulty = skill.default_difficulty
-            turns = skill.default_turns
+            turns = req.totalTurns or skill.default_turns or getattr(settings, "DEBATE_SAFETY_MAX_TURNS", 20)
             reminder = skill.reminder
 
     session_id = f"session-{uuid.uuid4().hex[:8]}"

@@ -16,14 +16,20 @@ export default function ProgressPage() {
   const router = useRouter();
   const onboarded = useStore((s) => s.onboarded);
   const liveXp = useStore((s) => s.xp);
-  const [stats, setStats] = useState<ProgressStats | null>(null);
+  const [stats, setStats] = useState<ProgressStats>(() => ({
+    ...mockProgressStats,
+    xp: mockProgressStats.xp + liveXp,
+    debatesCompleted: mockProgressStats.debatesCompleted + (useStore.getState().debatesCompleted || 0),
+  }));
 
   useEffect(() => {
     if (!onboarded) router.replace("/onboarding");
-    appService.getProgress().then(setStats);
+    appService.getProgress().then((s) => {
+      if (s) setStats(s);
+    }).catch(() => {});
   }, [onboarded, router]);
 
-  if (!onboarded || !stats) return <main className="flex min-h-dvh items-center justify-center" />;
+  if (!onboarded) return <main className="flex min-h-dvh items-center justify-center" />;
 
   // Use live stats from backend API with fallback
   const merged: ProgressStats = {

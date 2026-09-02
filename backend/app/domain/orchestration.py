@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Set
@@ -185,102 +186,39 @@ class DebateOrchestrator:
             user_text_lower = user_transcript.lower()
             is_closing_statement = any(
                 phrase in user_text_lower
-                for phrase in ["in conclusion", "to conclude", "finally,", "i rest my case", "closing statement", "that is my case", "concluding argument", "that concludes my argument"]
+                for phrase in [
+                    "in conclusion",
+                    "to conclude",
+                    "finally,",
+                    "i rest my case",
+                    "closing statement",
+                    "that is my case",
+                    "concluding argument",
+                    "that concludes my argument",
+                ]
             )
 
-            # A debate finishes automatically when configured total_user_turns is reached or closing statement delivered
-            is_final_turn = (turn_num >= total_turns) or is_closing_statement
+            # Hard safety ceiling: if user turn already reached or exceeded configured total_user_turns
+            reached_hard_cap = turn_num >= total_turns
 
-            if not is_final_turn:
-                # -------------------------------------------------------------------
-                # Continuous turn:
-                # Modal task runs in background and saves evidence.
-                # Debate critical path: GPT-5.6 Luna opponent -> TTS.
-                # -------------------------------------------------------------------
+            if reached_hard_cap:
+                # Safety cap reached without further opponent response
                 if modal_task is not None:
-                    asyncio.create_task(
-                        DebateOrchestrator._save_turn_evidence_background(
+                    try:
+                        final_ev = await asyncio.wait_for(modal_task, timeout=8.0)
+                        await session_repo.save_temporary_evidence(
                             session_id=session_id,
                             turn_number=turn_num,
-                            modal_task=modal_task,
+                            evidence_dict=final_ev,
                         )
-                    )
+                        logger.info("speech.phoneme_processing.completed", turn_number=turn_num)
+                    except Exception as e:
+                        logger.warning("speech.phoneme_processing.timed_out", turn_number=turn_num, error=str(e))
 
-                turns = await session_repo.get_turns(session_id)
-                turn_history = []
-                for t in turns:
-                    txt = encryptor.decrypt_str(t.text_encrypted) if t.text_encrypted else None
-                    turn_history.append({
-                        "speaker": t.speaker,
-                        "text": txt or "",
-                        "turn_number": t.turn_number,
-                    })
-
-                prefs = UserRepository(db).get_preferences(user) or {}
-                intensity = prefs.get("intensity", "balanced")
-                opp_side = "disagree" if fresh_session.user_side == "agree" else "agree"
-
-                opponent_messages = build_opponent_prompt(
-                    topic=fresh_session.topic_text,
-                    opponent_side=opp_side,
-                    user_side=fresh_session.user_side,
-                    skill_name=fresh_session.skill_name,
-                    difficulty=fresh_session.difficulty,
-                    intensity=intensity,
-                    turn_history=turn_history,
-                    current_turn_number=turn_num,
-                    total_turns=total_turns,
-                )
-
-                # Opponent generation (plain text response)
-                logger.info(
-                    "debate.opponent_generation.started",
-                    turn_number=turn_num,
-                    opponent_side=opp_side,
-                    intensity=intensity,
-                )
-                t_opp_start = time.perf_counter()
-                try:
-                    opponent_text = await ai_gateway.generate_debate_response(
-                        messages=opponent_messages,
-                        current_turn=turn_num,
-                    )
-                    opp_dur_ms = round((time.perf_counter() - t_opp_start) * 1000, 2)
-                    logger.info("debate.opponent_generation.completed", turn_number=turn_num, duration_ms=opp_dur_ms)
-                except Exception as e:
-                    opp_dur_ms = round((time.perf_counter() - t_opp_start) * 1000, 2)
-                    logger.error("debate.opponent_generation.failed", turn_number=turn_num, duration_ms=opp_dur_ms, exception_type=e.__class__.__name__)
-                    raise
-
-                # Synthesize TTS concurrently
-                tts_task = asyncio.create_task(
-                    ai_gateway.synthesize_speech(text=opponent_text, voice=settings.REBUTIO_TTS_VOICE)
-                )
-
-                opponent_turn_record = await session_repo.save_turn(
-                    session_id=session_id,
-                    turn_number=turn_num,
-                    speaker="opponent",
-                    text=opponent_text,
-                    audio_available=True,
-                    duration_sec=0.0,
-                    idempotency_key=f"{idempotency_key}:opponent" if idempotency_key else None,
-                )
-                logger.info("debate.turn.committed", turn_number=turn_num, speaker="opponent", turn_id=opponent_turn_record.id)
-
-                # Await TTS for playback cache
-                try:
-                    audio_bytes_tts = await tts_task
-                    if audio_bytes_tts and len(audio_bytes_tts) > 0:
-                        tts_cache.put(session_id, opponent_turn_record.id, audio_bytes_tts)
-                except Exception as e:
-                    logger.warning("debate.tts.failed", error=str(e))
-
-                next_turn = turn_num + 1
                 await session_repo.update_current_turn(
                     session_id=session_id,
-                    next_turn_number=next_turn,
-                    status="active",
+                    next_turn_number=turn_num,
+                    status="review_pending",
                 )
 
                 user_turn_schema = DebateTurnSchema(
@@ -291,17 +229,181 @@ class DebateOrchestrator:
                     mediaAssetId=user_asset_id,
                 )
 
-                opponent_turn_schema = DebateTurnSchema(
-                    id=opponent_turn_record.id,
-                    speaker="opponent",
-                    text=opponent_text,
-                    playback={
-                        "available": bool(tts_cache.get(session_id, opponent_turn_record.id)),
-                        "audioUrl": f"/api/sessions/{session_id}/turns/{opponent_turn_record.id}/audio",
-                    },
+                logger.info(
+                    "session.state_changed",
+                    from_state="user_turn_submitted",
+                    to_state="review_pending",
+                    turn_id=turn_num,
                 )
 
-                # State Transition: opponent_thinking -> opponent_ready
+                await session_events.emit(session_id, "session.finished", {"sessionId": session_id})
+                asyncio.create_task(DebateOrchestrator.finalize_debate_review(session_id, user_id))
+
+                return SubmitTurnResponseSchema(
+                    userTurn=user_turn_schema,
+                    opponentTurn=None,
+                    nextUserTurnNumber=turn_num,
+                    finished=True,
+                )
+
+            # -------------------------------------------------------------------
+            # Active Turn with Opponent Response:
+            # Opponent evaluates the argument and may decide to conclude the spar naturally.
+            # -------------------------------------------------------------------
+            if modal_task is not None:
+                asyncio.create_task(
+                    DebateOrchestrator._save_turn_evidence_background(
+                        session_id=session_id,
+                        turn_number=turn_num,
+                        modal_task=modal_task,
+                    )
+                )
+
+            turns = await session_repo.get_turns(session_id)
+            turn_history = []
+            for t in turns:
+                txt = encryptor.decrypt_str(t.text_encrypted) if t.text_encrypted else None
+                turn_history.append({
+                    "speaker": t.speaker,
+                    "text": txt or "",
+                    "turn_number": t.turn_number,
+                })
+
+            prefs = UserRepository(db).get_preferences(user) or {}
+            intensity = prefs.get("intensity", "balanced")
+            opp_side = "disagree" if fresh_session.user_side == "agree" else "agree"
+
+            opponent_messages = build_opponent_prompt(
+                topic=fresh_session.topic_text,
+                opponent_side=opp_side,
+                user_side=fresh_session.user_side,
+                skill_name=fresh_session.skill_name,
+                difficulty=fresh_session.difficulty,
+                intensity=intensity,
+                turn_history=turn_history,
+                current_turn_number=turn_num,
+                total_turns=total_turns,
+                is_closing_statement=is_closing_statement,
+            )
+
+            # Opponent generation
+            logger.info(
+                "debate.opponent_generation.started",
+                turn_number=turn_num,
+                opponent_side=opp_side,
+                intensity=intensity,
+            )
+            t_opp_start = time.perf_counter()
+            try:
+                raw_opponent_text = await ai_gateway.generate_debate_response(
+                    messages=opponent_messages,
+                    current_turn=turn_num,
+                )
+                opp_dur_ms = round((time.perf_counter() - t_opp_start) * 1000, 2)
+                logger.info("debate.opponent_generation.completed", turn_number=turn_num, duration_ms=opp_dur_ms)
+            except Exception as e:
+                opp_dur_ms = round((time.perf_counter() - t_opp_start) * 1000, 2)
+                logger.error("debate.opponent_generation.failed", turn_number=turn_num, duration_ms=opp_dur_ms, exception_type=e.__class__.__name__)
+                raise
+
+            # Detect if opponent model decided to conclude or if closing statement was given
+            conclude_match = re.search(r"\[\s*CONCLUDE_DEBATE\s*\]", raw_opponent_text, re.IGNORECASE)
+            model_wants_to_conclude = bool(conclude_match)
+            opponent_text = re.sub(r"\[\s*CONCLUDE_DEBATE\s*\]", "", raw_opponent_text, flags=re.IGNORECASE).strip()
+
+            debate_is_finished = model_wants_to_conclude or is_closing_statement
+
+            # Synthesize TTS concurrently on clean opponent text
+            tts_task = asyncio.create_task(
+                ai_gateway.synthesize_speech(text=opponent_text, voice=settings.REBUTIO_TTS_VOICE)
+            )
+
+            opponent_turn_record = await session_repo.save_turn(
+                session_id=session_id,
+                turn_number=turn_num,
+                speaker="opponent",
+                text=opponent_text,
+                audio_available=True,
+                duration_sec=0.0,
+                idempotency_key=f"{idempotency_key}:opponent" if idempotency_key else None,
+            )
+            logger.info("debate.turn.committed", turn_number=turn_num, speaker="opponent", turn_id=opponent_turn_record.id)
+
+            # Await TTS for playback cache
+            try:
+                audio_bytes_tts = await tts_task
+                if audio_bytes_tts and len(audio_bytes_tts) > 0:
+                    tts_cache.put(session_id, opponent_turn_record.id, audio_bytes_tts)
+            except Exception as e:
+                logger.warning("debate.tts.failed", error=str(e))
+
+            next_turn = turn_num + 1
+
+            user_turn_schema = DebateTurnSchema(
+                id=user_turn_record.id,
+                speaker="user",
+                text=user_transcript,
+                playback={"available": bool(audio_bytes)},
+                mediaAssetId=user_asset_id,
+            )
+
+            opponent_turn_schema = DebateTurnSchema(
+                id=opponent_turn_record.id,
+                speaker="opponent",
+                text=opponent_text,
+                playback={
+                    "available": bool(tts_cache.get(session_id, opponent_turn_record.id)),
+                    "audioUrl": f"/api/sessions/{session_id}/turns/{opponent_turn_record.id}/audio",
+                },
+            )
+
+            if debate_is_finished:
+                logger.info(
+                    "debate.concluded",
+                    session_id=session_id,
+                    turn_number=turn_num,
+                    model_concluded=model_wants_to_conclude,
+                    user_closing=is_closing_statement,
+                    safety_cap_reached=(turn_num + 1 >= total_turns),
+                )
+                await session_repo.update_current_turn(
+                    session_id=session_id,
+                    next_turn_number=next_turn,
+                    status="review_pending",
+                )
+                logger.info(
+                    "session.state_changed",
+                    from_state="opponent_thinking",
+                    to_state="review_pending",
+                    turn_id=turn_num,
+                    next_turn=next_turn,
+                )
+
+                await session_events.emit(
+                    session_id,
+                    "opponent.turn_ready",
+                    {
+                        "userTurn": user_turn_schema.model_dump(),
+                        "opponentTurn": opponent_turn_schema.model_dump(),
+                        "nextTurn": next_turn,
+                        "finished": True,
+                    },
+                )
+                await session_events.emit(session_id, "session.finished", {"sessionId": session_id})
+                asyncio.create_task(DebateOrchestrator.finalize_debate_review(session_id, user_id))
+
+                return SubmitTurnResponseSchema(
+                    userTurn=user_turn_schema,
+                    opponentTurn=opponent_turn_schema,
+                    nextUserTurnNumber=next_turn,
+                    finished=True,
+                )
+            else:
+                await session_repo.update_current_turn(
+                    session_id=session_id,
+                    next_turn_number=next_turn,
+                    status="active",
+                )
                 logger.info(
                     "session.state_changed",
                     from_state="opponent_thinking",
@@ -328,55 +430,6 @@ class DebateOrchestrator:
                     finished=False,
                 )
 
-            else:
-                # -------------------------------------------------------------------
-                # Final user turn (natural close or safety cap):
-                # Await final Modal evidence, then finalize review.
-                # -------------------------------------------------------------------
-                if modal_task is not None:
-                    try:
-                        final_ev = await asyncio.wait_for(modal_task, timeout=8.0)
-                        await session_repo.save_temporary_evidence(
-                            session_id=session_id,
-                            turn_number=turn_num,
-                            evidence_dict=final_ev,
-                        )
-                        logger.info("speech.phoneme_processing.completed", turn_number=turn_num)
-                    except Exception as e:
-                        logger.warning("speech.phoneme_processing.timed_out", turn_number=turn_num, error=str(e))
-
-                await session_repo.update_current_turn(
-                    session_id=session_id,
-                    next_turn_number=turn_num,
-                    status="review_pending",
-                )
-
-                user_turn_schema = DebateTurnSchema(
-                    id=user_turn_record.id,
-                    speaker="user",
-                    text=user_transcript,
-                    playback={"available": bool(audio_bytes)},
-                )
-
-                logger.info(
-                    "session.state_changed",
-                    from_state="user_turn_submitted",
-                    to_state="review_pending",
-                    turn_id=turn_num,
-                )
-
-                # Emit finished event
-                await session_events.emit(session_id, "session.finished", {"sessionId": session_id})
-
-                # Launch review finalization in background
-                asyncio.create_task(DebateOrchestrator.finalize_debate_review(session_id, user_id))
-
-                return SubmitTurnResponseSchema(
-                    userTurn=user_turn_schema,
-                    opponentTurn=None,
-                    nextUserTurnNumber=turn_num,
-                    finished=True,
-                )
 
     @staticmethod
     async def _save_turn_evidence_background(

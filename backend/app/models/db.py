@@ -101,7 +101,7 @@ class DebateSession(Base):
     skill_reminder = Column(Text, nullable=False)
     difficulty = Column(String(32), default="steady", nullable=False)
     user_side = Column(String(16), nullable=False)  # "agree" | "disagree"
-    total_user_turns = Column(Integer, default=4, nullable=False)
+    total_user_turns = Column(Integer, default=20, nullable=False)
     current_turn = Column(Integer, default=1, nullable=False)
     status = Column(String(32), default="active", nullable=False)  # "active" | "finished" | "abandoned" | "error"
     is_onboarding = Column(Boolean, default=False, nullable=False)

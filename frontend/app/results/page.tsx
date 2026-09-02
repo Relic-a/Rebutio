@@ -21,13 +21,22 @@ function Results() {
   const params = useSearchParams();
   const router = useRouter();
   const review = useStore((s) => s.lastReview);
+  const storedTranscriptTurns = useStore((s) => s.lastTranscriptTurns);
   const [showTranscript, setShowTranscript] = useState(false);
   const [disagreeOpen, setDisagreeOpen] = useState(false);
   const [feedbackSent, setFeedbackSent] = useState(false);
-  const [transcriptTurns, setTranscriptTurns] = useState<{ speaker: string; text: string }[] | null>(null);
+  const [transcriptTurns, setTranscriptTurns] = useState<{ speaker: string; text: string }[] | null>(
+    () => storedTranscriptTurns || null
+  );
   const [loadingTranscript, setLoadingTranscript] = useState(false);
 
   const sessionId = review?.sessionId || "latest";
+
+  useEffect(() => {
+    if (storedTranscriptTurns && !transcriptTurns) {
+      setTranscriptTurns(storedTranscriptTurns);
+    }
+  }, [storedTranscriptTurns, transcriptTurns]);
 
   useEffect(() => {
     if (showTranscript && !transcriptTurns) {

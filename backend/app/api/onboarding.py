@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.config import settings
 from backend.app.api.dependencies import get_current_user
 from backend.app.domain.curriculum import get_skill
 from backend.app.domain.topics import TopicInventoryService
@@ -75,7 +76,7 @@ async def start_onboarding_spar(
     )
 
     skill = get_skill(skill_id)
-    total_turns = 3  # Onboarding placement debate is always 3 turns
+    total_turns = getattr(settings, "DEBATE_SAFETY_MAX_TURNS", 20)  # Multi-round safety ceiling; model concludes naturally
     session_id = f"spar-{uuid.uuid4().hex[:8]}"
 
     session_record = await sess_repo.create_session(

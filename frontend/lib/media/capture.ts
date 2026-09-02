@@ -8,6 +8,8 @@ export type CaptureAdapter = {
   /** Pre-permission probe: returns availability without requesting. */
   checkAvailability(): Promise<"available" | "denied" | "unavailable">;
   requestPermission(): Promise<"allowed" | "denied" | "unavailable">;
+  warmup?(): Promise<void>;
+  release?(): Promise<void>;
   startRecording(): Promise<void>;
   stopRecording(): Promise<Blob | null>;
   cancelRecording(): Promise<void>;
@@ -24,6 +26,16 @@ class BrowserCapture implements CaptureAdapter {
   private stream: MediaStream | null = null;
   private chunks: Blob[] = [];
 
+  private getActiveStream(): MediaStream | null {
+    if (this.stream) {
+      const activeTracks = this.stream.getAudioTracks().filter((t) => t.readyState === "live");
+      if (activeTracks.length > 0) {
+        return this.stream;
+      }
+    }
+    return null;
+  }
+
   async checkAvailability(): Promise<"available" | "denied" | "unavailable"> {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return "unavailable";
     try {
@@ -38,9 +50,8 @@ class BrowserCapture implements CaptureAdapter {
   async requestPermission(): Promise<"allowed" | "denied" | "unavailable"> {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return "unavailable";
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      this.stream.getTracks().forEach((t) => t.stop());
-      this.stream = null;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.stream = stream;
       return "allowed";
     } catch (e) {
       const name = (e as DOMException)?.name;
@@ -48,10 +59,37 @@ class BrowserCapture implements CaptureAdapter {
     }
   }
 
-  async startRecording() {
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  async warmup(): Promise<void> {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
+    if (!this.getActiveStream()) {
+      try {
+        this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch {
+        // Non-blocking warmup
+      }
+    }
+  }
+
+  async release(): Promise<void> {
+    if (this.recorder && this.recorder.state !== "inactive") {
+      try {
+        this.recorder.stop();
+      } catch {}
+    }
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+    this.recorder = null;
     this.chunks = [];
-    this.recorder = new MediaRecorder(this.stream);
+  }
+
+  async startRecording() {
+    let stream = this.getActiveStream();
+    if (!stream) {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.stream = stream;
+    }
+    this.chunks = [];
+    this.recorder = new MediaRecorder(stream);
     this.recorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) {
         this.chunks.push(e.data);
@@ -67,8 +105,7 @@ class BrowserCapture implements CaptureAdapter {
       rec.onstop = () => {
         const mime = rec.mimeType || "audio/webm";
         const blob = new Blob(this.chunks, { type: mime });
-        this.stream?.getTracks().forEach((t) => t.stop());
-        this.stream = null;
+        // Stream remains open for subsequent turns to prevent device re-init latency
         this.recorder = null;
         resolve(blob);
       };
@@ -78,10 +115,10 @@ class BrowserCapture implements CaptureAdapter {
 
   async cancelRecording(): Promise<void> {
     if (this.recorder && this.recorder.state !== "inactive") {
-      this.recorder.stop();
+      try {
+        this.recorder.stop();
+      } catch {}
     }
-    this.stream?.getTracks().forEach((t) => t.stop());
-    this.stream = null;
     this.recorder = null;
     this.chunks = [];
   }
@@ -110,6 +147,8 @@ export const capture: CaptureAdapter =
     : {
         async checkAvailability() { return "unavailable"; },
         async requestPermission() { return "unavailable"; },
+        async warmup() {},
+        async release() {},
         async startRecording() { throw new Error("unavailable"); },
         async stopRecording() { return null; },
         async cancelRecording() {},

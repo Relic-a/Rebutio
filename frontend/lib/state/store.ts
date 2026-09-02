@@ -18,8 +18,9 @@ type StoreState = {
   record: { wins: number; losses: number; draws: number };
   debatesCompleted: number;
   lastReview: DebateReview | null;
+  lastTranscriptTurns: Array<{ speaker: string; text: string }> | null;
   completeOnboarding: (prefs: OnboardingPreferences) => void;
-  applyReview: (review: DebateReview, opts?: { recordStars?: boolean }) => void;
+  applyReview: (review: DebateReview, opts?: { recordStars?: boolean; turns?: Array<{ speaker: string; text: string }> }) => void;
   reset: () => void;
 };
 
@@ -35,6 +36,7 @@ export const useStore = create<StoreState>()(
       record: { wins: 0, losses: 0, draws: 0 },
       debatesCompleted: 0,
       lastReview: null,
+      lastTranscriptTurns: null,
       completeOnboarding: (prefs) => set({ onboarded: true, preferences: prefs }),
       applyReview: (review, opts) => {
         const cur = get();
@@ -55,6 +57,7 @@ export const useStore = create<StoreState>()(
             draws: cur.record.draws + (review.outcome === "draw" ? 1 : 0),
           },
           lastReview: review,
+          lastTranscriptTurns: opts?.turns ?? cur.lastTranscriptTurns,
           starsByNodeId,
         });
       },

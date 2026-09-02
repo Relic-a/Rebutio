@@ -373,7 +373,7 @@ class AIGateway:
         elif any(w in last_user_text for w in ["clarify", "mean", "specifically", "actually", "distinction"]):
             return "Even accepting that clarification, the fundamental problem remains. Shifting the definition does not remove the negative externalities you still have to account for."
         elif any(w in last_user_text for w in ["in conclusion", "to conclude", "finally", "rest my case", "closing"]):
-            return "You have summarized your case clearly, but you have failed to resolve the core contradiction raised in our clash. Without that resolution, your central premise cannot stand."
+            return "You have summarized your case clearly, but you have failed to resolve the core contradiction raised in our clash. Without that resolution, your central premise cannot stand.\n[CONCLUDE_DEBATE]"
 
         mock_responses = [
             "Your argument rests on an unproven assumption, but it overlooks the core mechanism. If what you claim were true, we would see far different real-world outcomes.",

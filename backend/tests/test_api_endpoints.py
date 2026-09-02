@@ -54,7 +54,7 @@ async def test_bootstrap_and_onboarding_flow():
         assert resp_spar.status_code == 200
         spar_data = resp_spar.json()
         assert "session" in spar_data
-        assert spar_data["session"]["totalUserTurns"] == 3
+        assert spar_data["session"]["totalUserTurns"] >= 20
         session_id = spar_data["session"]["id"]
 
         # 4. Submit Turn 1 (with audio simulation)

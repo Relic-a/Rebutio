@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     # Topic Inventory settings
     INVENTORY_TARGET_COUNT: int = 5
     INVENTORY_REFILL_THRESHOLD: int = 2
+    DEBATE_SAFETY_MAX_TURNS: int = 20
 
 
 settings = Settings()

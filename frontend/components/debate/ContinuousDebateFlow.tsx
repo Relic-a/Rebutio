@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { appService, getAuthenticatedMediaBlobUrl, noteCurrentSession } from "@/lib/api";
+import { appService, getAuthenticatedMediaBlobUrl, noteCurrentSession, prefetchAuthenticatedMedia } from "@/lib/api";
 import { capture } from "@/lib/media/capture";
 import { logger } from "@/lib/logger";
 import type { DebateReview, DebateSession, DebateSetup, Speaker } from "@/lib/types";
@@ -31,7 +31,7 @@ export function ContinuousDebateFlow({
 }: {
   session: DebateSession;
   setup: DebateSetup;
-  onFinish: (review: DebateReview) => void;
+  onFinish: (review: DebateReview, turns?: Array<{ speaker: string; text: string }>) => void;
 }) {
   const [phase, setPhase] = useState<Phase>("ready");
   const [turnIndex, setTurnIndex] = useState(session.currentTurn || 1);
@@ -65,10 +65,16 @@ export function ContinuousDebateFlow({
   const [micDenied, setMicDenied] = useState(false);
   const [turnError, setTurnError] = useState<string | null>(null);
   const [activeAudioPlaying, setActiveAudioPlaying] = useState<string | null>(null);
-  const [elapsedDebateTime, setElapsedDebateTime] = useState(0);
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
   const [finishError, setFinishError] = useState<string | null>(null);
+
+  // Release audio capture stream on unmount
+  useEffect(() => {
+    return () => {
+      void capture.release?.();
+    };
+  }, []);
 
   const turnsScrollRef = useRef<HTMLDivElement | null>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
@@ -84,7 +90,7 @@ export function ContinuousDebateFlow({
       await appService.finishDebate(session);
       stage = "review";
       const review = await appService.getDebateReview(session.id);
-      onFinish(review);
+      onFinish(review, turns.map((t) => ({ speaker: t.speaker, text: t.text })));
     } catch (err) {
       const apiError = err as Error & { requestId?: string; status?: number };
       const logContext = {
@@ -123,18 +129,6 @@ export function ContinuousDebateFlow({
     scrollToBottom();
   }, [turns, phase, scrollToBottom]);
 
-  // Overall debate timer
-  useEffect(() => {
-    const iv = setInterval(() => setElapsedDebateTime((t) => t + 1), 1000);
-    return () => clearInterval(iv);
-  }, []);
-
-  // Format seconds mm:ss
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m}:${s < 10 ? "0" : ""}${s}`;
-  };
 
   // Play opponent audio if available
   const playTurnAudio = async (turnId: string, url: string) => {
@@ -306,28 +300,62 @@ export function ContinuousDebateFlow({
 
       if (result.finished) {
         setPhase("finished");
-        // Fetch debate review and complete
-        try {
-          const review = await appService.getDebateReview(session.id);
-          onFinish(review);
-        } catch (revErr) {
-          logger.error("debate.review_fetch_failed", { sessionId: session.id }, revErr);
-          // Fallback honest unrated review
-          onFinish({
-            sessionId: session.id,
-            outcome: "undetermined",
-            stars: { stars: 0, completed: false, skillDemonstrated: false, masteryNote: "Review unavailable." },
-            xpEarned: 0,
-            streakExtended: false,
-            topic: session.topic,
-            skillName: session.skillTarget.name,
-            scoreTechnique: { score: null, label: "Debate Technique", rubric: "Review evaluation unavailable." },
-            scoreGrammar: { score: null, label: "Grammar & Accuracy", rubric: "Review evaluation unavailable." },
-            scoreVocabulary: { score: null, label: "Vocabulary & Precision", rubric: "Review evaluation unavailable." },
-            scoreDelivery: { score: null, label: "Delivery & Clarity", rubric: "Review evaluation unavailable." },
-            strongestMoment: undefined,
-            improvementOpportunity: "Review evaluation service was temporarily unavailable.",
-          });
+        const fetchReview = async () => {
+          try {
+            return await appService.getDebateReview(session.id);
+          } catch (revErr) {
+            logger.error("debate.review_fetch_failed", { sessionId: session.id }, revErr);
+            return {
+              sessionId: session.id,
+              outcome: "undetermined" as const,
+              stars: { stars: 0 as const, completed: false, skillDemonstrated: false, masteryNote: "Review unavailable." },
+              xpEarned: 0,
+              streakExtended: false,
+              topic: session.topic,
+              skillName: session.skillTarget.name,
+              scoreTechnique: { score: null, label: "Debate Technique", rubric: "Review evaluation unavailable." },
+              scoreGrammar: { score: null, label: "Grammar & Accuracy", rubric: "Review evaluation unavailable." },
+              scoreVocabulary: { score: null, label: "Vocabulary & Precision", rubric: "Review evaluation unavailable." },
+              scoreDelivery: { score: null, label: "Delivery & Clarity", rubric: "Review evaluation unavailable." },
+              strongestMoment: undefined,
+              improvementOpportunity: "Review evaluation service was temporarily unavailable.",
+            };
+          }
+        };
+
+        const reviewPromise = fetchReview();
+
+        const navigateToReview = async () => {
+          const review = await reviewPromise;
+          onFinish(review, turns.map((t) => ({ speaker: t.speaker, text: t.text })));
+        };
+
+        // If opponent delivered concluding remarks, allow audio or reading time
+        if (result.opponentTurn && result.opponentTurn.text) {
+          const hasAudio = Boolean(result.opponentTurn.playback?.audioUrl);
+          if (hasAudio && audioPlayerRef.current) {
+            let finishedNav = false;
+            const onAudioEnd = () => {
+              if (!finishedNav) {
+                finishedNav = true;
+                void navigateToReview();
+              }
+            };
+            audioPlayerRef.current.addEventListener("ended", onAudioEnd, { once: true });
+            setTimeout(() => {
+              if (!finishedNav) {
+                finishedNav = true;
+                void navigateToReview();
+              }
+            }, 18000);
+          } else {
+            // Text only: give 4 seconds to read concluding remarks
+            setTimeout(() => {
+              void navigateToReview();
+            }, 4000);
+          }
+        } else {
+          void navigateToReview();
         }
       } else {
         // Return to ready state for next turn
@@ -376,13 +404,7 @@ export function ContinuousDebateFlow({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <div className="flex items-center gap-1 rounded-full bg-parchment px-2.5 py-1 text-xs font-semibold text-ink-soft">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>
-            <span>{formatTime(elapsedDebateTime)}</span>
-          </div>
+          <DebateTimer />
 
           <button
             onClick={() => setShowFinishModal(true)}
@@ -510,7 +532,15 @@ export function ContinuousDebateFlow({
           </div>
         )}
 
-        {isTextMode ? (
+        {phase === "finished" ? (
+          <div className="flex flex-col items-center justify-center py-2 text-center text-xs text-ink-soft space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-rally animate-pulse" />
+              <span className="font-semibold text-ink">Debate Concluded</span>
+            </div>
+            <p className="text-[11px]">Preparing your performance evaluation and coaching breakdown...</p>
+          </div>
+        ) : isTextMode ? (
           /* Text Composer Mode */
           <div className="space-y-2">
             <div className="flex items-center gap-2">
@@ -599,7 +629,7 @@ export function ContinuousDebateFlow({
 
                 <button
                   onClick={startRecording}
-                  disabled={phase === "processing" || phase === "finished"}
+                  disabled={phase === "processing"}
                   className="group relative flex h-14 w-14 items-center justify-center rounded-full bg-rally text-white shadow-lg transition-transform active:scale-95 disabled:opacity-50"
                   title="Press to speak"
                 >
@@ -681,5 +711,27 @@ export function ContinuousDebateFlow({
         )}
       </AnimatePresence>
     </main>
+  );
+}
+
+function DebateTimer() {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const iv = setInterval(() => setElapsed((t) => t + 1), 1000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const m = Math.floor(elapsed / 60);
+  const s = elapsed % 60;
+
+  return (
+    <div className="flex items-center gap-1 rounded-full bg-parchment px-2.5 py-1 text-xs font-semibold text-ink-soft">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 16 14" />
+      </svg>
+      <span>{m}:{s < 10 ? "0" : ""}{s}</span>
+    </div>
   );
 }

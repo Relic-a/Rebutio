@@ -53,17 +53,30 @@ async function hydrateBrowserAuth(): Promise<void> {
   }
 }
 
+let cachedAccessToken: { token: string; expiresAt: number } | null = null;
+
 export async function getValidAccessToken(): Promise<string | null> {
+  const now = Date.now();
+  if (cachedAccessToken && cachedAccessToken.expiresAt > now) {
+    return cachedAccessToken.token;
+  }
+
   try {
     const httpClient = insforge.getHttpClient();
     let token = await httpClient.getValidAccessToken();
-    if (token) return token;
+    if (token) {
+      cachedAccessToken = { token, expiresAt: now + 30000 };
+      return token;
+    }
 
     // The browser SDK keeps access tokens in memory. On a cold load,
     // getCurrentUser() restores that session from the httpOnly refresh cookie.
     await hydrateBrowserAuth();
     token = await httpClient.getValidAccessToken();
-    if (token) return token;
+    if (token) {
+      cachedAccessToken = { token, expiresAt: now + 30000 };
+      return token;
+    }
   } catch {
     // Non-blocking
   }
@@ -82,26 +95,63 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
   return {};
 }
 
+const mediaBlobCache = new Map<string, string>();
+const inFlightMediaFetches = new Map<string, Promise<string | null>>();
+const MAX_MEDIA_CACHE_SIZE = 50;
+
 export async function getAuthenticatedMediaBlobUrl(url: string): Promise<string | null> {
-  if (typeof window === "undefined") return null;
+  if (typeof window === "undefined" || !url) return null;
   // If already a blob URL or external absolute URL that doesn't need proxy, return directly
   if (url.startsWith("blob:")) return url;
 
-  const apiHost = process.env.NEXT_PUBLIC_API_URL ?? (typeof window !== "undefined" ? "" : "http://localhost:8000");
-  const targetUrl = url.startsWith("http") ? url : `${apiHost}${url}`;
-  try {
-    const headers = await getAuthHeaders();
-    const res = await fetch(targetUrl, { headers });
-    if (!res.ok) {
-      logger.warn("media.fetch_failed", { status: res.status, url: targetUrl });
-      return null;
-    }
-    const blob = await res.blob();
-    return URL.createObjectURL(blob);
-  } catch (err) {
-    logger.error("media.blob_create_failed", { url: targetUrl }, err);
-    return null;
+  if (mediaBlobCache.has(url)) {
+    return mediaBlobCache.get(url)!;
   }
+
+  if (inFlightMediaFetches.has(url)) {
+    return inFlightMediaFetches.get(url)!;
+  }
+
+  const fetchPromise = (async () => {
+    const apiHost = process.env.NEXT_PUBLIC_API_URL ?? (typeof window !== "undefined" ? "" : "http://localhost:8000");
+    const targetUrl = url.startsWith("http") ? url : `${apiHost}${url}`;
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(targetUrl, { headers });
+      if (!res.ok) {
+        logger.warn("media.fetch_failed", { status: res.status, url: targetUrl });
+        return null;
+      }
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
+      // LRU eviction
+      if (mediaBlobCache.size >= MAX_MEDIA_CACHE_SIZE) {
+        const oldestKey = mediaBlobCache.keys().next().value;
+        if (oldestKey) {
+          const oldBlobUrl = mediaBlobCache.get(oldestKey);
+          if (oldBlobUrl) URL.revokeObjectURL(oldBlobUrl);
+          mediaBlobCache.delete(oldestKey);
+        }
+      }
+
+      mediaBlobCache.set(url, blobUrl);
+      return blobUrl;
+    } catch (err) {
+      logger.error("media.blob_create_failed", { url: targetUrl }, err);
+      return null;
+    } finally {
+      inFlightMediaFetches.delete(url);
+    }
+  })();
+
+  inFlightMediaFetches.set(url, fetchPromise);
+  return fetchPromise;
+}
+
+export function prefetchAuthenticatedMedia(url?: string | null): void {
+  if (!url || url.startsWith("blob:")) return;
+  void getAuthenticatedMediaBlobUrl(url);
 }
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -605,7 +655,7 @@ export function createMockService(): AppService {
         skillTarget: { id: "take_a_side", name: "Take a Side", hint: "Pick a side and hold it." },
         difficulty: "gentle",
         userSide: "agree",
-        totalUserTurns: 3,
+        totalUserTurns: 20,
         currentTurn: 1,
         status: "active",
         turns: [],
@@ -621,7 +671,7 @@ export function createMockService(): AppService {
       } else {
         topic = mockDebateTopics.find((t) => t.id === topicId) ?? mockDebateTopics[0];
       }
-      const total = onboarding ? 3 : topic!.turns;
+      const total = onboarding ? 20 : (topic!.turns || 20);
       const session: DebateSession = {
         id: `session-${Date.now()}`,
         topic: topic!.topic,
@@ -650,12 +700,12 @@ export function createMockService(): AppService {
       await delay(thinking);
       const userTurn = { id: `t-u-${session.currentTurn}`, speaker: "user" as const, text: turn?.transcript, playback: turn?.audio ? { available: true } : undefined };
       const fixture = mockDebateTopics.find((t) => t.topic === session.topic);
-      const line = fixture?.opponentLines[session.currentTurn - 1];
+      const line = fixture?.opponentLines[session.currentTurn - 1] ?? "We have defended our position thoroughly. The clash has reached its natural conclusion.";
       const opponentTurn = { id: `t-o-${session.currentTurn}`, speaker: "opponent" as const, text: line };
       const finished = session.currentTurn >= session.totalUserTurns;
       return {
         userTurn,
-        opponentTurn: finished ? undefined : opponentTurn,
+        opponentTurn,
         nextUserTurnNumber: Math.min(session.currentTurn + 1, session.totalUserTurns),
         finished,
       };
