@@ -179,6 +179,7 @@ export type AppService = {
   }): Promise<any>;
   getMediaAssetAudioUrl(assetId: string): string;
   getClipAudioUrl(clipId: string): string;
+  getPronunciationAudioUrl(text: string): string;
 };
 
 // ---------------------------------------------------------------------------
@@ -529,6 +530,10 @@ export function createHttpService(baseUrl: string = ""): AppService {
     getClipAudioUrl(clipId: string) {
       return `${apiBase}/api/media/clips/${clipId}/audio`;
     },
+
+    getPronunciationAudioUrl(text: string) {
+      return `${apiBase}/api/coach/pronunciation?text=${encodeURIComponent(text)}`;
+    },
   };
 }
 
@@ -839,6 +844,9 @@ export function createMockService(): AppService {
     },
     getClipAudioUrl(clipId: string) {
       return `/api/media/clips/${clipId}/audio`;
+    },
+    getPronunciationAudioUrl(text: string) {
+      return `/api/coach/pronunciation?text=${encodeURIComponent(text)}`;
     },
   };
 }
