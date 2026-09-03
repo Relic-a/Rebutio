@@ -12,20 +12,28 @@ import modal
 # Define Modal App
 app = modal.App("rebutio-speech-analysis")
 
-# Remote persistent volume for caching Hugging Face & DeepFilterNet weights across deployments
-model_cache_volume = modal.Volume.from_name("rebutio-model-cache", create_if_missing=True)
+# Remote persistent volumes for caching weights across deployments.
+# NOTE: current Modal versions reject (a) mounting the same Volume at two
+# paths and (b) mounting a Volume over a non-empty image path, so HF and
+# DeepFilterNet each get their own volume at their own subpath.
+hf_cache_volume = modal.Volume.from_name("rebutio-hf-cache", create_if_missing=True)
+df_cache_volume = modal.Volume.from_name("rebutio-df-cache", create_if_missing=True)
 
 # Remote container image definition with PyTorch CPU, DeepFilterNet, Transformers, Librosa
+# NOTE: torch/torchaudio are pinned, not ranged. torchaudio 2.9 removed
+# `torchaudio.backend`, which deepfilternet 0.5.6 still imports; an
+# unpinned resolve pulls 2.9+ and breaks worker boot. torch 2.8.x is the
+# newest line compatible with deepfilternet 0.5.6.
 speech_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git", "ffmpeg", "libsndfile1")
     .pip_install(
-        "torch>=2.5.0",
-        "torchaudio>=2.5.0",
+        "torch==2.8.0",
+        "torchaudio==2.8.0",
         index_url="https://download.pytorch.org/whl/cpu",
     )
     .pip_install(
-        "deepfilternet>=0.5.6",
+        "deepfilternet==0.5.6",
         "transformers>=4.44.0",
         "huggingface_hub>=0.24.0",
         "soundfile>=0.12.1",
@@ -51,8 +59,8 @@ def _modal_log(event: str, **kwargs):
     memory=8192,
     secrets=[hf_secret],
     volumes={
-        "/root/.cache/huggingface": model_cache_volume,
-        "/root/.cache/deepfilternet": model_cache_volume,
+        "/root/.cache/huggingface": hf_cache_volume,
+        "/root/.cache/deepfilternet": df_cache_volume,
     },
     min_containers=0,
     buffer_containers=0,
