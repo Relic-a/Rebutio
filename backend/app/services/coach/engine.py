@@ -183,7 +183,7 @@ class CoachEngine:
             )
             return thread
 
-        title = f"Debate Review: {session.topic_text[:50]}"
+        title = f"Speaking Review: {session.topic_text[:50]}"
         thread = await coach_repo.get_or_create_debate_thread(
             user_id=user_id,
             session_id=session.id,
@@ -235,6 +235,9 @@ class CoachEngine:
                     "delivery": review.score_delivery if review else 8,
                     "strongest_moment": review.strongest_moment if review else "Your speech stayed understandable across the exchange.",
                     "improvement_opportunity": review.improvement_opportunity if review else "Use shorter sentences so each spoken idea lands clearly.",
+                    "grammar_advice": review.grammar_advice if review else None,
+                    "vocabulary_advice": review.vocabulary_advice if review else None,
+                    "pronunciation_advice": review.pronunciation_advice if review else None,
                     "language_feedback": encryptor.decrypt_json(review.language_feedback_encrypted) if review and review.language_feedback_encrypted else {},
                     "has_sufficient_evidence": True,
                 }
@@ -288,12 +291,16 @@ class CoachEngine:
                     )
 
             opening_data = {
+                "reply_text": opening_res.overall_assessment,
                 "overall_assessment": opening_res.overall_assessment,
                 "most_important_strength": opening_res.most_important_strength,
                 "highest_value_improvement": opening_res.highest_value_improvement,
                 "concrete_example": opening_res.concrete_example,
                 "evidence_turn_number": opening_res.evidence_turn_number,
                 "suggested_quick_replies": [
+                    {"label": r, "prompt": r} for r in opening_res.suggested_quick_replies
+                ],
+                "quick_replies": [
                     {"label": r, "prompt": r} for r in opening_res.suggested_quick_replies
                 ],
             }
@@ -415,6 +422,9 @@ class CoachEngine:
                 "score_delivery": review.score_delivery if review else 8,
                 "strongest_moment": review.strongest_moment if review else "Solid speech during turn 2.",
                 "improvement_opportunity": review.improvement_opportunity if review else "Keep your spoken sentences concise.",
+                "grammar_advice": review.grammar_advice if review else None,
+                "vocabulary_advice": review.vocabulary_advice if review else None,
+                "pronunciation_advice": review.pronunciation_advice if review else None,
                 "language_feedback": encryptor.decrypt_json(review.language_feedback_encrypted) if review and review.language_feedback_encrypted else {},
                 "transcript": sess_transcript,
             }
@@ -678,27 +688,25 @@ class CoachEngine:
                     turnNumber=ec.get("turn_number"),
                     available=ec.get("available", True),
                 )
-            if "overall_assessment" in sd:
+            if "overall_assessment" in sd or "reply_text" in sd:
+                text_val = sd.get("overall_assessment") or sd.get("reply_text") or ""
+                replies_raw = sd.get("suggested_quick_replies") or sd.get("quick_replies") or []
                 opening_analysis = OpeningAnalysisSchema(
-                    overallAssessment=sd.get("overall_assessment", ""),
+                    overallAssessment=text_val,
                     mostImportantStrength=sd.get("most_important_strength", ""),
                     highestValueImprovement=sd.get("highest_value_improvement", ""),
                     concreteExample=sd.get("concrete_example"),
                     evidenceTurnNumber=sd.get("evidence_turn_number"),
                     suggestedQuickReplies=[
                         QuickReplySchema(label=r.get("label", ""), prompt=r.get("prompt", ""))
-                        for r in sd.get("suggested_quick_replies", [])
+                        for r in replies_raw
                     ],
                 )
-            if "suggested_quick_replies" in sd and not opening_analysis:
+            replies = sd.get("suggested_quick_replies") or sd.get("quick_replies")
+            if replies:
                 quick_replies = [
                     QuickReplySchema(label=r.get("label", ""), prompt=r.get("prompt", ""))
-                    for r in sd.get("suggested_quick_replies", [])
-                ]
-            elif "quick_replies" in sd:
-                quick_replies = [
-                    QuickReplySchema(label=r.get("label", ""), prompt=r.get("prompt", ""))
-                    for r in sd.get("quick_replies", [])
+                    for r in replies
                 ]
 
         return CoachMessageSchema(

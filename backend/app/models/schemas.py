@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 
@@ -462,9 +462,10 @@ class OpponentMoveResponse(BaseModel):
 class CoachOpeningAnalysisResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    overall_assessment: str
-    most_important_strength: str = Field(default="You held your ground with strong counterpoints.", alias="mostImportantStrength")
-    highest_value_improvement: str = Field(default="Lead with your main claim earlier.", alias="highestValueImprovement")
+    reply_text: Optional[str] = None
+    overall_assessment: str = Field(default="")
+    most_important_strength: str = Field(default="Your speech stayed understandable across the exchange.", alias="mostImportantStrength")
+    highest_value_improvement: str = Field(default="Use shorter sentences so each spoken idea lands clearly.", alias="highestValueImprovement")
     concrete_example: Optional[str] = None
     evidence_turn_number: Optional[int] = None
     suggested_quick_replies: List[str] = Field(
@@ -476,6 +477,21 @@ class CoachOpeningAnalysisResult(BaseModel):
             "Let me try that again",
         ]
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def unify_text_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            text = (
+                data.get("reply_text")
+                or data.get("text")
+                or data.get("overall_assessment")
+                or data.get("overallAssessment")
+                or ""
+            )
+            data["overall_assessment"] = text
+            data["reply_text"] = text
+        return data
 
 
 

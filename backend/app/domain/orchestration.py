@@ -721,7 +721,7 @@ class DebateOrchestrator:
                                 topic=session.topic_text,
                                 target_skill=session.skill_name,
                                 difficulty=session.difficulty,
-                                turns_evidence=[{"turn_number": i + 1, "evidence": ev} for i, ev in enumerate(all_evidence)],
+                                turns_evidence=user_turns_evidence if user_turns_evidence else [{"turn_number": i + 1, "evidence": ev} for i, ev in enumerate(all_evidence)],
                             )
                             patch_task = asyncio.create_task(ai_gateway.analyze_language(patch_messages))
 

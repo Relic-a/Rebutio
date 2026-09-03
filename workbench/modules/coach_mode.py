@@ -58,6 +58,9 @@ class CoachModeEngine:
             "delivery": rev.score_delivery.score if rev and rev.score_delivery else 8,
             "strongest_moment": rev.strongest_moment if rev else "Your speech stayed understandable across the exchange.",
             "improvement_opportunity": rev.improvement_opportunity if rev else "Use shorter sentences so each spoken idea lands clearly.",
+            "grammar_advice": rev.grammar_advice if rev else None,
+            "vocabulary_advice": rev.vocabulary_advice if rev else None,
+            "pronunciation_advice": rev.pronunciation_advice if rev else None,
             "language_feedback": rev.language_feedback if rev and rev.language_feedback else {},
             "has_sufficient_evidence": rev.evidence_assessment.has_sufficient_evidence if rev else True,
         }

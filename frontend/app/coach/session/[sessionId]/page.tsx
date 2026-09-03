@@ -196,9 +196,9 @@ export default function SessionCoachPage() {
         </button>
 
         <div className="flex flex-1 min-w-0 flex-col items-center text-center px-2">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-rally">Debate AI Coach</span>
-          <h1 className="w-full truncate text-xs font-bold text-ink" title={threadDetail?.thread.topic || "Debate Review"}>
-            {threadDetail?.thread.topic || "Debate Review"}
+          <span className="text-[10px] font-bold uppercase tracking-wider text-rally">Language Coach</span>
+          <h1 className="w-full truncate text-xs font-bold text-ink" title={threadDetail?.thread.topic || "Speaking Session"}>
+            {threadDetail?.thread.topic || "Speaking Session"}
           </h1>
         </div>
 
@@ -215,7 +215,7 @@ export default function SessionCoachPage() {
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 text-center text-ink-soft">
             <div className="w-8 h-8 border-2 border-rally border-t-transparent rounded-full animate-spin mb-3" />
-            <p className="text-xs font-semibold">Your coach is analyzing your debate...</p>
+            <p className="text-xs font-semibold">Your coach is reviewing your speaking session...</p>
           </div>
         ) : errorMsg && !threadDetail ? (
           <div className="flex flex-col items-center justify-center py-20 text-center text-ink-soft space-y-3">
@@ -253,28 +253,35 @@ export default function SessionCoachPage() {
                   animate={{ opacity: 1, y: 0 }}
                   className={`flex flex-col ${isCoach ? "items-start" : "items-end"}`}
                 >
-                  {/* Proactive Opening Analysis Card */}
-                  {m.messageType === "opening_analysis" && m.openingAnalysis && (
+                  {/* Proactive Opening Coaching Card */}
+                  {m.messageType === "opening_analysis" && (
                     <div className="w-full rounded-2xl bg-white border border-rally/20 p-4 shadow-sm mb-2 space-y-3">
                       <div className="flex items-center gap-2 text-xs font-bold text-rally">
                         <span className="w-2 h-2 rounded-full bg-rally animate-pulse" />
-                        <span>Debate Opening Analysis</span>
+                        <span>Spoken English Coaching</span>
                       </div>
 
-                      <PronunciationText text={m.openingAnalysis.overallAssessment} className="text-sm font-semibold text-ink leading-relaxed whitespace-pre-wrap" />
+                      <PronunciationText
+                        text={m.text || m.openingAnalysis?.overallAssessment || ""}
+                        className="text-sm font-medium text-ink leading-relaxed whitespace-pre-wrap"
+                      />
 
-                      <div className="grid grid-cols-1 gap-2 pt-1">
-                        <div className="rounded-xl bg-rally-mist/50 p-2.5 text-xs">
-                          <span className="font-bold text-rally-deep">Standout Strength: </span>
-                          <PronunciationText text={m.openingAnalysis.mostImportantStrength} className="inline text-ink" />
-                        </div>
-                        <div className="rounded-xl bg-amber-soft/50 p-2.5 text-xs">
-                          <span className="font-bold text-amber-900">Highest-Value Growth: </span>
-                          <PronunciationText text={m.openingAnalysis.highestValueImprovement} className="inline text-ink" />
-                        </div>
-                      </div>
+                      {m.openingAnalysis?.mostImportantStrength &&
+                        m.openingAnalysis?.highestValueImprovement &&
+                        m.openingAnalysis.mostImportantStrength !== m.openingAnalysis.overallAssessment && (
+                          <div className="grid grid-cols-1 gap-2 pt-1">
+                            <div className="rounded-xl bg-rally-mist/50 p-2.5 text-xs">
+                              <span className="font-bold text-rally-deep">Standout Strength: </span>
+                              <PronunciationText text={m.openingAnalysis.mostImportantStrength} className="inline text-ink" />
+                            </div>
+                            <div className="rounded-xl bg-amber-soft/50 p-2.5 text-xs">
+                              <span className="font-bold text-amber-900">Highest-Value Growth: </span>
+                              <PronunciationText text={m.openingAnalysis.highestValueImprovement} className="inline text-ink" />
+                            </div>
+                          </div>
+                      )}
 
-                      {m.openingAnalysis.concreteExample && (
+                      {m.openingAnalysis?.concreteExample && (
                         <p className="text-xs text-ink-soft italic bg-parchment p-2 rounded-lg">
                           &ldquo;{m.openingAnalysis.concreteExample}&rdquo;
                         </p>
@@ -283,7 +290,7 @@ export default function SessionCoachPage() {
                   )}
 
                   {/* Standard Message Bubble */}
-                  {m.text && (m.messageType !== "opening_analysis" || !m.openingAnalysis) && (
+                  {m.text && m.messageType !== "opening_analysis" && (
                     <div className="flex items-end gap-2 max-w-[85%]">
                       {isCoach && (
                         <div className="w-7 h-7 rounded-full bg-rally flex items-center justify-center text-white text-xs font-bold shrink-0 mb-1">
@@ -355,14 +362,14 @@ export default function SessionCoachPage() {
                   )}
 
                   {/* Suggested Quick Replies */}
-                  {m.quickReplies && m.quickReplies.length > 0 && (
+                  {((m.quickReplies && m.quickReplies.length > 0) || (m.openingAnalysis?.suggestedQuickReplies && m.openingAnalysis.suggestedQuickReplies.length > 0)) && (
                     <div className="mt-3 flex flex-wrap gap-1.5">
-                      {m.quickReplies.map((qr, idx) => (
+                      {(m.quickReplies || m.openingAnalysis?.suggestedQuickReplies || []).map((qr, idx) => (
                         <button
                           key={idx}
                           onClick={() => handleSendText(qr.prompt)}
                           disabled={isSending}
-                          className="rounded-full border border-rally/30 bg-white px-3 py-1 text-xs font-semibold text-rally hover:bg-rally-mist transition-colors disabled:opacity-50"
+                          className="rounded-full border border-rally/30 bg-white px-3 py-1 text-xs font-semibold text-rally hover:bg-rally-mist transition-colors disabled:opacity-50 cursor-pointer"
                         >
                           {qr.label}
                         </button>
