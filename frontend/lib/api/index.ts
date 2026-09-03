@@ -20,6 +20,7 @@ import type {
 } from "@/lib/types";
 import {
   firstSparByInterest,
+  getEffectivePath,
   mockDebateTopics,
   mockDrawReview,
   mockLearningPath,
@@ -152,6 +153,20 @@ export async function getAuthenticatedMediaBlobUrl(url: string): Promise<string 
 export function prefetchAuthenticatedMedia(url?: string | null): void {
   if (!url || url.startsWith("blob:")) return;
   void getAuthenticatedMediaBlobUrl(url);
+}
+
+export async function getAuthenticatedAudioStreamUrl(url: string): Promise<string> {
+  if (typeof window === "undefined" || !url) return url;
+  if (url.startsWith("blob:") || url.startsWith("data:")) return url;
+
+  const apiHost = process.env.NEXT_PUBLIC_API_URL ?? (typeof window !== "undefined" ? "" : "http://localhost:8000");
+  const targetUrl = url.startsWith("http") ? url : `${apiHost}${url}`;
+
+  const token = await getValidAccessToken();
+  if (!token) return targetUrl;
+
+  const separator = targetUrl.includes("?") ? "&" : "?";
+  return `${targetUrl}${separator}token=${encodeURIComponent(token)}`;
 }
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -642,7 +657,17 @@ export function createMockService(): AppService {
     },
     async getDebateChoices() {
       await delay(250);
-      return mockDebateTopics;
+      try {
+        const { useStore } = await import("@/lib/state/store");
+        const effectivePath = getEffectivePath(useStore.getState().starsByNodeId);
+        const unlockedSkillIds = new Set(
+          effectivePath.nodes.filter((n) => n.status !== "locked").map((n) => n.id)
+        );
+        const unlockedTopics = mockDebateTopics.filter((t) => unlockedSkillIds.has(t.skill));
+        return unlockedTopics.length > 0 ? unlockedTopics : [mockDebateTopics[0]];
+      } catch {
+        return mockDebateTopics;
+      }
     },
     async getSession(sessionId: string) {
       await delay(250);
@@ -669,7 +694,33 @@ export function createMockService(): AppService {
         const key = interests?.find((i) => firstSparByInterest[i]);
         topic = mockDebateTopics.find((t) => t.id === (key && firstSparByInterest[key])) ?? mockDebateTopics.find((t) => t.id === "social-media");
       } else {
-        topic = mockDebateTopics.find((t) => t.id === topicId) ?? mockDebateTopics[0];
+        if (topicId) {
+          const num = Number(topicId);
+          if (!isNaN(num)) {
+            const foundNode = mockLearningPath.nodes.find((n) => n.order === num);
+            if (foundNode) {
+              topic = mockDebateTopics.find((t) => t.skill === foundNode.id || t.id === foundNode.topicId);
+            }
+          }
+          if (!topic) {
+            topic = mockDebateTopics.find((t) => t.id === topicId || t.skill === topicId);
+          }
+        }
+        if (!topic) {
+          topic = mockDebateTopics[0];
+        }
+
+        // Lock check in mock service
+        try {
+          const { useStore } = await import("@/lib/state/store");
+          const effectivePath = getEffectivePath(useStore.getState().starsByNodeId);
+          const node = effectivePath.nodes.find((n) => n.id === topic!.skill);
+          if (node && node.status === "locked") {
+            throw new Error(`Skill '${node.name}' is locked. Earn at least 1 star on the previous skill to unlock it.`);
+          }
+        } catch (e: any) {
+          if (e?.message?.includes("locked")) throw e;
+        }
       }
       const total = onboarding ? 20 : (topic!.turns || 20);
       const session: DebateSession = {

@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   },
   experimental: {
     optimizePackageImports: ["framer-motion", "@insforge/sdk"],
+    devtoolSegmentExplorer: false,
   },
   async rewrites() {
     return [

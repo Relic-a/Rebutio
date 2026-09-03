@@ -309,39 +309,59 @@ export const firstSparByInterest: Record<string, string> = {
 };
 
 export const mockLearningPath: LearningPath = {
-  levelName: "Counterpoint",
-  levelNumber: 3,
+  levelName: "Take a Side",
+  levelNumber: 1,
   nodes: [
-    { id: "take_a_side", order: 1, name: "Take a Side", description: "State a position and hold it under pressure.", stars: 3, status: "complete", topicId: "cats-dogs", topicPreview: "Cats are better pets than dogs." },
-    { id: "give_a_reason", order: 2, name: "Give a Reason", description: "Back your position with a clear reason.", stars: 2, status: "complete", topicId: "uniforms", topicPreview: "School uniforms are actually a good idea." },
-    { id: "back_it_up", order: 3, name: "Back It Up", description: "Support your reason with a concrete example.", stars: 2, status: "complete", topicPreview: "Homework should be abolished." },
-    { id: "counterpoint", order: 4, name: "Counterpoint", description: "Build an argument against theirs, not just for yours.", stars: 0, status: "current", topicId: "social-media", topicPreview: "Social media has made friendships worse." },
-    { id: "rebuttal", order: 5, name: "Rebuttal", description: "Respond directly to their strongest point.", stars: 0, status: "locked", topicId: "college", topicPreview: "College is no longer worth the cost." },
-    { id: "concession", order: 6, name: "Concession", description: "Concede part of their argument without dropping yours.", stars: 0, status: "locked", topicPreview: "Remote work is better for careers." },
-    { id: "devils_advocate", order: 7, name: "Devil's Advocate", description: "Defend a position you don't personally agree with.", stars: 0, status: "locked" },
-    { id: "cross_examination", order: 8, name: "Cross Examination", description: "Press their weakest point with direct questions.", stars: 0, status: "locked" },
-    { id: "evidence", order: 9, name: "Evidence", description: "Weigh examples and proof, not just opinions.", stars: 0, status: "locked" },
-    { id: "nuance", order: 10, name: "Nuance", description: "Compare competing principles in abstract debate.", stars: 0, status: "locked" },
+    { id: "take_a_side", order: 1, name: "Take a Side", description: "State a position and hold it under pressure.", stars: 0, status: "current", topicId: "cats-dogs", topicPreview: "Cats are better pets than dogs." },
+    { id: "give_a_reason", order: 2, name: "Give a Reason", description: "Back your position with a clear reason.", stars: 0, status: "locked", topicId: "uniforms", topicPreview: "School uniforms are actually a good idea." },
+    { id: "back_it_up", order: 3, name: "Back It Up", description: "Support your reason with a concrete example.", stars: 0, status: "locked", topicPreview: "Homework should be abolished in primary school." },
+    { id: "counterpoint", order: 4, name: "Counterpoint", description: "Build an argument against theirs, not just for yours.", stars: 0, status: "locked", topicId: "social-media", topicPreview: "Social media has made friendships worse." },
+    { id: "counterargument", order: 5, name: "Counterargument", description: "Deliver a structured counterargument challenging logic.", stars: 0, status: "locked", topicId: "ai-jobs", topicPreview: "AI will create more jobs than it destroys." },
+    { id: "rebuttal", order: 6, name: "Rebuttal", description: "Respond directly to their strongest point.", stars: 0, status: "locked", topicId: "college", topicPreview: "College is no longer worth the cost." },
+    { id: "concession", order: 7, name: "Concession", description: "Concede part of their argument without dropping yours.", stars: 0, status: "locked", topicPreview: "Remote work is better for careers." },
+    { id: "devils_advocate", order: 8, name: "Devil's Advocate", description: "Defend a position you don't personally agree with.", stars: 0, status: "locked" },
+    { id: "cross_examination", order: 9, name: "Cross Examination", description: "Press their weakest point with direct questions.", stars: 0, status: "locked" },
+    { id: "evidence", order: 10, name: "Evidence", description: "Weigh examples and proof, not just opinions.", stars: 0, status: "locked" },
+    { id: "nuance", order: 11, name: "Nuance", description: "Compare competing principles in abstract debate.", stars: 0, status: "locked" },
   ],
 };
 
 /** Derives node status from earned stars so progression updates live. */
 export function getEffectivePath(starsByNodeId: Record<string, number>): LearningPath {
   const nodes = mockLearningPath.nodes.map((n) => {
-    const stars = (starsByNodeId[n.id] ?? n.stars) as 0 | 1 | 2 | 3;
+    const rawStars = starsByNodeId[n.id] ?? 0;
+    const stars = Math.max(0, Math.min(3, rawStars)) as 0 | 1 | 2 | 3;
     return { ...n, stars };
   });
-  let currentSet = false;
-  for (let i = nodes.length - 1; i >= 0; i--) {
+
+  let prevCompleted = true; // first node unlocked by default
+  let currentFound = false;
+
+  for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
-    const done = n.stars >= 1;
-    if (done) n.status = "complete";
-    else if (!currentSet) {
+    if (n.stars >= 1) {
+      n.status = "complete";
+      prevCompleted = true;
+    } else if (prevCompleted && !currentFound) {
       n.status = "current";
-      currentSet = true;
-    } else n.status = "locked";
+      currentFound = true;
+      prevCompleted = false;
+    } else {
+      n.status = "locked";
+      prevCompleted = false;
+    }
   }
-  return { ...mockLearningPath, nodes };
+
+  if (!currentFound && nodes.length > 0 && nodes[0].status !== "complete") {
+    nodes[0].status = "current";
+  }
+
+  const current = nodes.find((n) => n.status === "current") ?? nodes[0];
+  return {
+    levelName: current.name,
+    levelNumber: current.order,
+    nodes,
+  };
 }
 
 export const onboardingOptions = {

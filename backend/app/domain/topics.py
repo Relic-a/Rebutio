@@ -9,6 +9,7 @@ from backend.app.domain.curriculum import (
     CURRICULUM_SKILLS,
     get_current_skill_for_user,
     get_skill,
+    get_unlocked_skill_ids,
 )
 from backend.app.observability.logging import get_logger
 from backend.app.persistence.repositories import (
@@ -32,14 +33,21 @@ class TopicInventoryService:
     ) -> List[dict]:
         """
         Retrieves active unconsumed topics for the user.
+        Filters out any topics belonging to locked skills so locked topics are never exposed.
         If inventory is below threshold, triggers an asynchronous refill.
         """
         topic_repo = TopicInventoryRepository(db)
+        prog_repo = ProgressRepository(db)
+        prog = await prog_repo.get_progress(user_id)
+        unlocked_skills = get_unlocked_skill_ids(prog.stars_by_node_json or {})
+
         existing = await topic_repo.get_available_topics(user_id, limit=limit)
 
-        # Convert to choice dictionaries matching frontend expectation
+        # Convert to choice dictionaries matching frontend expectation (unlocked only)
         choices = []
         for t in existing:
+            if t.skill_id not in unlocked_skills:
+                continue
             skill = get_skill(t.skill_id)
             choices.append({
                 "id": t.topic_id,
@@ -51,7 +59,7 @@ class TopicInventoryService:
                 "reminder": t.reminder or skill.reminder,
             })
 
-        # If inventory was completely empty, generate synchronous fallback
+        # If inventory was completely empty of unlocked topics, generate synchronous fallback
         if not choices:
             fallback_topic = await TopicInventoryService.generate_synchronous_fallback(db, user_id)
             choices.append(fallback_topic)

@@ -1,6 +1,6 @@
 import io
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 import wave
 import httpx
 from backend.app.config import settings
@@ -149,6 +149,63 @@ class OpenRouterClient:
                 sample_rate = 44100
 
             return pcm_to_wav(raw_bytes, sample_rate=sample_rate, channels=1, sample_width=2)
+
+    async def stream_speech(
+        self,
+        text: str,
+        voice: Optional[str] = None,
+        model: Optional[str] = None,
+        response_format: str = "mp3",
+    ) -> AsyncIterator[bytes]:
+        """
+        Streams synthesized speech chunks using OpenRouter's dedicated TTS endpoint.
+        Returns an async iterator yielding raw audio chunks (e.g. MP3 frames).
+        """
+        if not self.is_configured:
+            raise ValueError("OpenRouter API key not configured")
+
+        model_id = model or settings.OPENROUTER_TTS_MODEL
+        voice_name = voice if voice is not None else settings.REBUTIO_TTS_VOICE
+        url = f"{self.base_url}/audio/speech"
+        headers = self._get_headers()
+        headers["Content-Type"] = "application/json"
+
+        fmt = "pcm" if response_format.lower() == "pcm" or "gemini" in model_id.lower() else "mp3"
+
+        payload: Dict[str, Any] = {
+            "model": model_id,
+            "input": text,
+            "response_format": fmt,
+            "stream": True,
+        }
+
+        # Filter out Gemini preset voice names if model is Fish Audio or doesn't support them
+        gemini_presets = {"zephyr", "puck", "aoede", "charon", "kore", "fenrir"}
+        is_fish = "fish" in model_id.lower()
+        is_gemini = "gemini" in model_id.lower()
+        if voice_name and str(voice_name).strip():
+            cleaned_voice = str(voice_name).strip()
+            if is_fish and cleaned_voice.lower() in gemini_presets:
+                pass
+            else:
+                payload["voice"] = cleaned_voice
+        elif is_gemini:
+            payload["voice"] = "Zephyr"
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as resp:
+                if resp.status_code != 200:
+                    err_content = await resp.aread()
+                    logger.error(
+                        "openrouter.tts_stream.error",
+                        status_code=resp.status_code,
+                        error_body=err_content.decode(errors="ignore")[:300],
+                    )
+                    resp.raise_for_status()
+
+                async for chunk in resp.aiter_bytes():
+                    if chunk:
+                        yield chunk
 
     async def chat_completion_raw(
         self,

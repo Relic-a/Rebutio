@@ -114,9 +114,58 @@ async def test_deepgram_flux_synthesis_mp3_handling(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_kokoro_synthesis_and_streaming(monkeypatch):
+    """
+    Verifies that hexgrad/kokoro-82m correctly passes model, voice (af_bella),
+    mp3 response_format, and stream=True when calling stream_speech.
+    """
+    client = OpenRouterClient(api_key="test-api-key")
+    captured_payload = None
+
+    class MockStreamResponse:
+        def __init__(self):
+            self.status_code = 200
+            self.headers = {"content-type": "audio/mpeg"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+        async def aiter_bytes(self):
+            yield b"\xff\xfb\x90\xc4\x00\x00\x00\x00"
+            yield b"\x01\x02\x03\x04"
+
+        def raise_for_status(self):
+            pass
+
+    def mock_stream(method, url, headers=None, json=None):
+        nonlocal captured_payload
+        captured_payload = json
+        return MockStreamResponse()
+
+    with patch("httpx.AsyncClient.stream", side_effect=mock_stream):
+        chunks = []
+        async for chunk in client.stream_speech(
+            text="Testing Kokoro",
+            voice="af_bella",
+            model="hexgrad/kokoro-82m",
+        ):
+            chunks.append(chunk)
+
+        assert captured_payload["model"] == "hexgrad/kokoro-82m"
+        assert captured_payload["response_format"] == "mp3"
+        assert captured_payload["voice"] == "af_bella"
+        assert captured_payload["stream"] is True
+        assert len(chunks) == 2
+        assert b"".join(chunks).startswith(b"\xff\xfb")
+
+
+@pytest.mark.asyncio
 async def test_gateway_synthesize_speech_uses_configured_model(monkeypatch):
     """
-    Verifies AIGateway uses deepgram/flux-tts:free and flux-jack-en by default.
+    Verifies AIGateway uses hexgrad/kokoro-82m and af_bella by default.
     """
-    assert "deepgram" in settings.OPENROUTER_TTS_MODEL or "flux-tts" in settings.OPENROUTER_TTS_MODEL
-    assert settings.REBUTIO_TTS_VOICE == "flux-jack-en"
+    assert "kokoro" in settings.OPENROUTER_TTS_MODEL
+    assert settings.REBUTIO_TTS_VOICE == "af_bella"

@@ -313,11 +313,6 @@ class DebateOrchestrator:
 
             debate_is_finished = model_wants_to_conclude or is_closing_statement
 
-            # Synthesize TTS concurrently on clean opponent text
-            tts_task = asyncio.create_task(
-                ai_gateway.synthesize_speech(text=opponent_text, voice=settings.REBUTIO_TTS_VOICE)
-            )
-
             opponent_turn_record = await session_repo.save_turn(
                 session_id=session_id,
                 turn_number=turn_num,
@@ -329,13 +324,14 @@ class DebateOrchestrator:
             )
             logger.info("debate.turn.committed", turn_number=turn_num, speaker="opponent", turn_id=opponent_turn_record.id)
 
-            # Await TTS for playback cache
-            try:
-                audio_bytes_tts = await tts_task
-                if audio_bytes_tts and len(audio_bytes_tts) > 0:
-                    tts_cache.put(session_id, opponent_turn_record.id, audio_bytes_tts)
-            except Exception as e:
-                logger.warning("debate.tts.failed", error=str(e))
+            # Start streaming TTS in background - do not block turn response
+            tts_cache.start_stream(
+                session_id=session_id,
+                turn_id=opponent_turn_record.id,
+                text=opponent_text,
+                stream_fn=ai_gateway.stream_speech,
+                voice=settings.REBUTIO_TTS_VOICE,
+            )
 
             next_turn = turn_num + 1
 
@@ -352,7 +348,7 @@ class DebateOrchestrator:
                 speaker="opponent",
                 text=opponent_text,
                 playback={
-                    "available": bool(tts_cache.get(session_id, opponent_turn_record.id)),
+                    "available": True,
                     "audioUrl": f"/api/sessions/{session_id}/turns/{opponent_turn_record.id}/audio",
                 },
             )

@@ -166,6 +166,42 @@ SKILL_MAP["direct_refutation"] = SkillDefinition(
 )
 
 
+FIXTURE_TOPIC_TO_SKILL: Dict[str, str] = {
+    "cats-dogs": "take_a_side",
+    "money-happiness": "take_a_side",
+    "uniforms": "give_a_reason",
+    "video-games": "give_a_reason",
+    "homework": "back_it_up",
+    "social-media": "counterpoint",
+    "ai-jobs": "counterargument",
+    "ai-art": "counterargument",
+    "college": "rebuttal",
+    "algorithms": "rebuttal",
+    "four-day": "rebuttal",
+    "concession": "concession",
+    "remote-work": "concession",
+    "space-money": "concession",
+    "identity-online": "devils_advocate",
+    "phone-ban": "cross_examination",
+    "free-speech": "evidence",
+    "inequality": "nuance",
+}
+
+DEFAULT_SKILL_TOPICS: Dict[str, tuple[str, str]] = {
+    "take_a_side": ("cats-dogs", "Cats are better pets than dogs."),
+    "give_a_reason": ("uniforms", "School uniforms are actually a good idea."),
+    "back_it_up": ("homework", "Homework should be abolished in primary school."),
+    "counterpoint": ("social-media", "Social media has made friendships worse."),
+    "counterargument": ("ai-jobs", "AI will create more jobs than it destroys."),
+    "rebuttal": ("college", "College is no longer worth the cost."),
+    "concession": ("remote-work", "Remote work is better for most careers than office work."),
+    "devils_advocate": ("identity-online", "People should be allowed to use any name and identity online."),
+    "cross_examination": ("phone-ban", "Schools should ban phones entirely during the day."),
+    "evidence": ("free-speech", "Free speech should protect deliberately misleading speech."),
+    "nuance": ("inequality", "Economic inequality is an unavoidable consequence of individual liberty."),
+}
+
+
 def get_skill(skill_id: str) -> SkillDefinition:
     return SKILL_MAP.get(skill_id, CURRICULUM_SKILLS[0])
 
@@ -200,6 +236,8 @@ def calculate_path_nodes(
             prev_completed = False
 
         preview = (topic_previews or {}).get(skill.id)
+        # Never expose startable topicId for locked nodes
+        node_topic_id = (topic_ids or {}).get(skill.id) if status != "locked" else None
         nodes.append({
             "id": skill.id,
             "order": skill.order,
@@ -207,7 +245,7 @@ def calculate_path_nodes(
             "description": skill.description,
             "stars": stars,
             "status": status,
-            "topicId": (topic_ids or {}).get(skill.id),
+            "topicId": node_topic_id,
             "topicPreview": preview,
         })
 
@@ -224,3 +262,45 @@ def get_current_skill_for_user(stars_by_node: Dict[str, int]) -> SkillDefinition
         if n["status"] == "current":
             return get_skill(n["id"])
     return CURRICULUM_SKILLS[0]
+
+
+def get_unlocked_skill_ids(stars_by_node: Dict[str, int]) -> set[str]:
+    nodes = calculate_path_nodes(stars_by_node)
+    return {n["id"] for n in nodes if n["status"] in ("current", "complete")}
+
+
+def is_skill_unlocked(skill_id: str, stars_by_node: Dict[str, int]) -> bool:
+    unlocked = get_unlocked_skill_ids(stars_by_node)
+    return skill_id in unlocked
+
+
+def get_skill_by_identifier(identifier: Optional[str]) -> Optional[SkillDefinition]:
+    """
+    Resolves a skill from:
+    1. Direct skill ID (e.g. 'take_a_side', 'give_a_reason')
+    2. Fixture topic ID (e.g. 'cats-dogs', 'uniforms', 'college')
+    3. Numeric order / level (e.g. '1', '2', 1, 2)
+    4. Prefixed order (e.g. 'level-1', 'level-2', 'debate-1', 'debate-2')
+    """
+    if not identifier:
+        return None
+    ident = str(identifier).strip().lower()
+    if ident in SKILL_MAP:
+        return SKILL_MAP[ident]
+    if ident in FIXTURE_TOPIC_TO_SKILL:
+        skill_id = FIXTURE_TOPIC_TO_SKILL[ident]
+        return SKILL_MAP.get(skill_id)
+    if ident.isdigit():
+        order_num = int(ident)
+        for s in CURRICULUM_SKILLS:
+            if s.order == order_num:
+                return s
+    for prefix in ("level-", "level_", "debate-", "debate_", "step-", "step_"):
+        if ident.startswith(prefix):
+            suffix = ident[len(prefix):]
+            if suffix.isdigit():
+                order_num = int(suffix)
+                for s in CURRICULUM_SKILLS:
+                    if s.order == order_num:
+                        return s
+    return None

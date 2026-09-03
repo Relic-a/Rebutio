@@ -17,7 +17,7 @@ if (!openRouterKey) {
   } catch (e) {}
 }
 
-const TTS_MODEL = "deepgram/flux-tts:free";
+const TTS_MODEL = "hexgrad/kokoro-82m";
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
 async function synthesizeSpeech(text) {
@@ -34,7 +34,7 @@ async function synthesizeSpeech(text) {
     body: JSON.stringify({
       model: TTS_MODEL,
       input: text,
-      voice: "flux-jack-en",
+      voice: "af_bella",
       response_format: "mp3",
     }),
   });

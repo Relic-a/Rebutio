@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.dependencies import get_current_user
+from backend.app.config import settings
 from backend.app.domain.events import session_events
 from backend.app.domain.orchestration import DebateOrchestrator
 from backend.app.models.db import User
@@ -209,18 +210,41 @@ async def get_turn_audio(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Plays ephemeral synthesized opponent audio.
-    Regenerates on demand if cache expired.
+    Plays ephemeral synthesized opponent audio via output streaming or cache.
+    Streams chunks progressively as OpenRouter synthesizes them.
     """
     bind_context(session_id=session_id, user_id=user.id, turn_id=turn_id)
+
+    # 1. Immediate cache hit (audio synthesis already completed)
     audio_bytes = tts_cache.get(session_id, turn_id)
     if audio_bytes:
         logger.debug("debate.tts.cache_hit", session_id=session_id, turn_id=turn_id)
         media_type = "audio/wav" if audio_bytes.startswith(b"RIFF") else "audio/mpeg"
-        return Response(content=audio_bytes, media_type=media_type)
+        return Response(
+            content=audio_bytes,
+            media_type=media_type,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(len(audio_bytes)),
+            },
+        )
 
-    logger.info("debate.tts.cache_miss_regenerating", session_id=session_id, turn_id=turn_id)
-    # If missing from cache, check if opponent turn text exists in DB to re-synthesize
+    # 2. In-flight stream hit (audio synthesis is currently in progress)
+    active_stream = tts_cache.get_stream(session_id, turn_id)
+    if active_stream:
+        logger.info("debate.tts.stream_hit", session_id=session_id, turn_id=turn_id)
+        return StreamingResponse(
+            active_stream.subscribe(),
+            media_type="audio/mpeg",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Transfer-Encoding": "chunked",
+            },
+        )
+
+    logger.info("debate.tts.cache_miss_streaming", session_id=session_id, turn_id=turn_id)
+    # 3. Cache miss: retrieve opponent turn text from DB and start on-demand stream
     sess_repo = DebateSessionRepository(db)
     session = await sess_repo.get_session(session_id)
     if session and session.user_id == user.id:
@@ -229,11 +253,22 @@ async def get_turn_audio(
         if turn and turn.speaker == "opponent" and turn.text_encrypted:
             txt = encryptor.decrypt_str(turn.text_encrypted)
             if txt:
-                audio_bytes = await ai_gateway.synthesize_speech(txt)
-                if audio_bytes:
-                    tts_cache.put(session_id, turn_id, audio_bytes)
-                    media_type = "audio/wav" if audio_bytes.startswith(b"RIFF") else "audio/mpeg"
-                    return Response(content=audio_bytes, media_type=media_type)
+                stream = tts_cache.start_stream(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    text=txt,
+                    stream_fn=ai_gateway.stream_speech,
+                    voice=settings.REBUTIO_TTS_VOICE,
+                )
+                return StreamingResponse(
+                    stream.subscribe(),
+                    media_type="audio/mpeg",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "X-Accel-Buffering": "no",
+                        "Transfer-Encoding": "chunked",
+                    },
+                )
 
     raise HTTPException(status_code=404, detail="Audio not found")
 
