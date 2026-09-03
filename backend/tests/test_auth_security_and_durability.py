@@ -694,7 +694,7 @@ async def test_migration_files_integrity_and_isolation():
     Verifies that:
     1. Base migration 20260831235601_create-rebutio-schema.sql is treated as immutable and does not
        contain the new completed_session_ids_json column in its CREATE TABLE.
-    2. The dedicated migration 20260901000001_add_completed_session_ids_to_learning_progress.sql exists
+    2. The dedicated migration 20260901000001_add-completed-session-ids-to-learning-progress.sql exists
        and provides the ALTER TABLE statement.
     """
     import glob
@@ -702,7 +702,7 @@ async def test_migration_files_integrity_and_isolation():
 
     migrations_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../migrations"))
     base_migration = os.path.join(migrations_dir, "20260831235601_create-rebutio-schema.sql")
-    new_migration = os.path.join(migrations_dir, "20260901000001_add_completed_session_ids_to_learning_progress.sql")
+    new_migration = os.path.join(migrations_dir, "20260901000001_add-completed-session-ids-to-learning-progress.sql")
 
     assert os.path.exists(base_migration), "Base migration file missing"
     assert os.path.exists(new_migration), "New migration file missing"
