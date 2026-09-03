@@ -57,6 +57,8 @@ frontend/node_modules/
 frontend/.next/
 out/
 frontend/out/
+.vercel/
+frontend/.vercel/
 .npm
 *.tsbuildinfo
 next-env.d.ts
