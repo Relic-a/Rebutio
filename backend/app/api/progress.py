@@ -55,7 +55,7 @@ async def get_progress(
     return ProgressStatsSchema(
         xp=prog.xp,
         streakDays=prog.streak_days,
-        streakHistory=prog.streak_history_json or [1, 1, 1, 0, 1, 1, 1],
+        streakHistory=prog.streak_history_json or [0, 0, 0, 0, 0, 0, 0],
         debatesCompleted=prog.debates_completed,
         wins=prog.wins,
         losses=prog.losses,

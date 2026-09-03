@@ -45,9 +45,9 @@ class LearningProgress(Base):
 
     user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     xp = Column(Integer, default=0, nullable=False)
-    streak_days = Column(Integer, default=1, nullable=False)
+    streak_days = Column(Integer, default=0, nullable=False)
     last_activity_date = Column(String(32), nullable=True)
-    streak_history_json = Column(JSON, default=lambda: [1, 1, 1, 0, 1, 1, 1], nullable=False)
+    streak_history_json = Column(JSON, default=lambda: [0, 0, 0, 0, 0, 0, 0], nullable=False)
     debates_completed = Column(Integer, default=0, nullable=False)
     wins = Column(Integer, default=0, nullable=False)
     losses = Column(Integer, default=0, nullable=False)

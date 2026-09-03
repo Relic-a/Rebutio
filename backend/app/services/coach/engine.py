@@ -776,7 +776,7 @@ class CoachEngine:
         progress_summary = ProgressStatsSchema(
             xp=progress.xp,
             streakDays=progress.streak_days,
-            streakHistory=progress.streak_history_json or [1, 1, 1, 0, 1, 1, 1],
+            streakHistory=progress.streak_history_json or [0, 0, 0, 0, 0, 0, 0],
             debatesCompleted=progress.debates_completed,
             wins=progress.wins,
             losses=progress.losses,

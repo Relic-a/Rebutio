@@ -27,6 +27,87 @@ from backend.app.services.privacy.encryption import encryptor
 
 logger = get_logger("rebutio.persistence")
 
+# ---------------------------------------------------------------------------
+# Streak helpers (date-based, once-per-day semantics)
+# ---------------------------------------------------------------------------
+
+EMPTY_STREAK_HISTORY: List[int] = [0, 0, 0, 0, 0, 0, 0]
+
+
+def _today_iso() -> str:
+    return datetime.date.today().isoformat()
+
+
+def _parse_iso_date(value: Optional[str]) -> Optional[datetime.date]:
+    if not value:
+        return None
+    try:
+        return datetime.date.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def normalize_streak_history(history: Any) -> List[int]:
+    """Coerce stored history into a 7-int list of 0/1, tolerating legacy data."""
+    if not isinstance(history, list):
+        return list(EMPTY_STREAK_HISTORY)
+    cleaned = [1 if v else 0 for v in history[:7]]
+    while len(cleaned) < 7:
+        cleaned.insert(0, 0)
+    return cleaned
+
+
+def resolve_streak(
+    current_streak_days: int,
+    last_activity_date: Optional[str],
+    history: Any,
+    qualifies: bool,
+    today_iso: Optional[str] = None,
+) -> Tuple[int, List[int], Optional[str], bool]:
+    """Apply once-per-day streak rules.
+
+    Returns (new_streak_days, new_history, new_last_activity_date, actually_extended).
+    - qualifies=False (insufficient evidence): nothing changes, extended=False.
+    - Same-day repeat: no increment, extended=False, history today marked active.
+    - Consecutive day (gap==1): +1, extended=True.
+    - New user or broken streak (gap>=2 / no history): restart at 1, extended=True.
+    """
+    today = today_iso or _today_iso()
+    hist = normalize_streak_history(history)
+
+    if not qualifies:
+        return current_streak_days or 0, hist, last_activity_date, False
+
+    if last_activity_date == today:
+        hist[-1] = 1
+        return current_streak_days or 0, hist, last_activity_date, False
+
+    last = _parse_iso_date(last_activity_date)
+    if last is not None:
+        try:
+            gap = (datetime.date.fromisoformat(today) - last).days
+        except (ValueError, TypeError):
+            gap = 2
+    else:
+        gap = None
+
+    if gap == 1:
+        new_streak = (current_streak_days or 0) + 1
+        new_hist = hist[1:] + [1]
+        return new_streak, new_hist, today, True
+
+    # New streak (first activity, or broken streak after a missed day)
+    if gap is None:
+        return 1, [0, 0, 0, 0, 0, 0, 1], today, True
+    if gap is not None and gap >= 7:
+        return 1, [0, 0, 0, 0, 0, 0, 1], today, True
+    # gap between 2 and 6, or unparseable/negative: roll history forward by gap
+    shift = gap if gap is not None and gap > 0 else 2
+    shift = min(shift, 7)
+    new_hist = (hist + [0] * 7)[shift:shift + 7]
+    new_hist[-1] = 1
+    return 1, new_hist, today, True
+
 DEFAULT_STARTER_MEMORY = """# Rebutio Coach Memory
 
 ## User Preferences & Goals
@@ -79,8 +160,8 @@ class UserRepository:
         progress = LearningProgress(
             user_id=new_user_id,
             xp=0,
-            streak_days=1,
-            streak_history_json=[1, 1, 1, 0, 1, 1, 1],
+            streak_days=0,
+            streak_history_json=list(EMPTY_STREAK_HISTORY),
             debates_completed=0,
             wins=0,
             losses=0,
@@ -163,8 +244,8 @@ class ProgressRepository:
             progress = LearningProgress(
                 user_id=user_id,
                 xp=0,
-                streak_days=1,
-                streak_history_json=[1, 1, 1, 0, 1, 1, 1],
+                streak_days=0,
+                streak_history_json=list(EMPTY_STREAK_HISTORY),
                 debates_completed=0,
                 wins=0,
                 losses=0,
@@ -174,6 +255,32 @@ class ProgressRepository:
                 placement_skill_id=None,
             )
             self.db.add(progress)
+            await self.db.commit()
+            await self.db.refresh(progress)
+            return progress
+
+        # Lazy streak maintenance on read so the API never shows a stale streak:
+        # - brand-new users with no activity must show 0, not a placeholder
+        # - a missed full day breaks the streak (reset to 0, roll history)
+        changed = False
+        if not progress.last_activity_date and (progress.debates_completed or 0) == 0:
+            if (progress.streak_days or 0) != 0 or normalize_streak_history(
+                progress.streak_history_json
+            ) != EMPTY_STREAK_HISTORY:
+                progress.streak_days = 0
+                progress.streak_history_json = list(EMPTY_STREAK_HISTORY)
+                changed = True
+        else:
+            last = _parse_iso_date(progress.last_activity_date)
+            if last is not None:
+                gap = (datetime.date.today() - last).days
+                if gap >= 2 and (progress.streak_days or 0) != 0:
+                    progress.streak_days = 0
+                    hist = normalize_streak_history(progress.streak_history_json)
+                    shift = min(gap, 7)
+                    progress.streak_history_json = (hist + [0] * 7)[shift:shift + 7]
+                    changed = True
+        if changed:
             await self.db.commit()
             await self.db.refresh(progress)
         return progress
@@ -188,13 +295,18 @@ class ProgressRepository:
         streak_extended: bool,
         is_onboarding: bool = False,
         session_id: Optional[str] = None,
-    ) -> LearningProgress:
+    ) -> Tuple[LearningProgress, bool]:
+        """Record a finished debate. Returns (progress, streak_actually_extended).
+
+        The returned flag reflects once-per-day rules: a qualifying debate only
+        extends the streak when it is the first qualifying debate of that day.
+        """
         prog = await self.get_progress(user_id)
 
         completed_sessions = list(prog.completed_session_ids_json or [])
         if session_id and session_id in completed_sessions:
             logger.info("progress.already_recorded_for_session", session_id=session_id, user_id=user_id)
-            return prog
+            return prog, False
 
         if session_id:
             completed_sessions.append(session_id)
@@ -203,16 +315,27 @@ class ProgressRepository:
         new_wins = prog.wins + (1 if outcome == "user_win" else 0)
         new_losses = prog.losses + (1 if outcome == "opponent_win" else 0)
         new_draws = prog.draws + (1 if outcome == "draw" else 0)
-        new_streak = prog.streak_days + (1 if streak_extended else 0)
+        new_streak, new_history, new_last_activity, actually_extended = resolve_streak(
+            prog.streak_days or 0,
+            prog.last_activity_date,
+            prog.streak_history_json,
+            qualifies=streak_extended,
+        )
 
         prog.xp += xp_earned
         prog.streak_days = new_streak
+        prog.streak_history_json = new_history
+        # Only qualifying (sufficient-evidence) debates that extend the streak
+        # update the activity date. Same-day repeats keep today's date;
+        # insufficient debates leave it untouched so they can't start/extend
+        # a streak.
+        if actually_extended:
+            prog.last_activity_date = new_last_activity
         if stars_earned > 0 or outcome in ("user_win", "opponent_win", "draw"):
             prog.debates_completed += 1
         prog.wins = new_wins
         prog.losses = new_losses
         prog.draws = new_draws
-        prog.last_activity_date = datetime.date.today().isoformat()
 
         if not is_onboarding and stars_earned > 0:
             stars_map = dict(prog.stars_by_node_json or {})
@@ -222,7 +345,7 @@ class ProgressRepository:
 
         await self.db.commit()
         await self.db.refresh(prog)
-        return prog
+        return prog, actually_extended
 
 
 class SpeechProfileRepository:

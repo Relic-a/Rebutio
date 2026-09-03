@@ -14,6 +14,7 @@ type StoreState = {
   xp: number;
   streakDays: number;
   streakExtendedThisSession: boolean;
+  lastStreakDate: string | null;
   starsByNodeId: Record<string, 0 | 1 | 2 | 3>;
   record: { wins: number; losses: number; draws: number };
   debatesCompleted: number;
@@ -30,8 +31,9 @@ export const useStore = create<StoreState>()(
       onboarded: false,
       preferences: defaultPreferences,
       xp: 0,
-      streakDays: 1,
+      streakDays: 0,
       streakExtendedThisSession: false,
+      lastStreakDate: null,
       starsByNodeId: {},
       record: { wins: 0, losses: 0, draws: 0 },
       debatesCompleted: 0,
@@ -46,10 +48,16 @@ export const useStore = create<StoreState>()(
           const prev = starsByNodeId[targetSkill] ?? 0;
           starsByNodeId[targetSkill] = Math.max(prev, review.stars.stars) as 0 | 1 | 2 | 3;
         }
+        // Once-per-day streak: only the first qualifying review per calendar
+        // day extends the streak. Same-day repeats keep the count unchanged.
+        const today = new Date().toISOString().slice(0, 10);
+        const alreadyCountedToday = cur.lastStreakDate === today;
+        const actuallyExtended = review.streakExtended && !alreadyCountedToday;
         set({
           xp: cur.xp + review.xpEarned,
-          streakDays: review.streakExtended ? cur.streakDays + 1 : cur.streakDays,
-          streakExtendedThisSession: review.streakExtended,
+          streakDays: actuallyExtended ? cur.streakDays + 1 : cur.streakDays,
+          streakExtendedThisSession: actuallyExtended,
+          lastStreakDate: actuallyExtended ? today : cur.lastStreakDate,
           debatesCompleted: cur.debatesCompleted + 1,
           record: {
             wins: cur.record.wins + (review.outcome === "user_win" ? 1 : 0),
@@ -66,14 +74,28 @@ export const useStore = create<StoreState>()(
           onboarded: false,
           preferences: defaultPreferences,
           xp: 0,
-          streakDays: 1,
+          streakDays: 0,
           streakExtendedThisSession: false,
+          lastStreakDate: null,
           starsByNodeId: {},
           record: { wins: 0, losses: 0, draws: 0 },
           debatesCompleted: 0,
           lastReview: null,
         }),
     }),
-    { name: "rebutio-demo" }
+    {
+      name: "rebutio-demo",
+      version: 1,
+      migrate: (persisted: unknown, _version: number) => {
+        const s = (persisted ?? {}) as Record<string, unknown>;
+        // v0 -> v1: introduce lastStreakDate; drop the old placeholder
+        // 1-day streak for users with no recorded streak activity.
+        if (s.lastStreakDate === undefined) {
+          s.lastStreakDate = null;
+          if (s.streakDays === 1) s.streakDays = 0;
+        }
+        return s as StoreState;
+      },
+    }
   )
 );

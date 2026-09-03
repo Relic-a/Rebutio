@@ -807,7 +807,10 @@ class DebateOrchestrator:
                             }
 
                     # Record completion & star progression (respecting onboarding placement vs regular debate)
-                    await prog_repo.record_debate_completion(
+                    # The repository resolves once-per-day streak rules and reports
+                    # whether this debate actually extended the streak (first
+                    # qualifying debate of the day). The review flag follows that.
+                    _, streak_extended = await prog_repo.record_debate_completion(
                         user_id=user_id,
                         skill_id=session.skill_id,
                         stars_earned=final_stars,
