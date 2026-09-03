@@ -297,53 +297,60 @@ function Briefing({
   if (!info) return <main className="flex min-h-dvh items-center justify-center text-ink-soft">Loading debate…</main>;
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-6 py-8">
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="flex flex-1 flex-col">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-ink-soft">Briefing</p>
-          <span className="rounded-full bg-ink/5 px-2.5 py-0.5 text-xs font-semibold text-ink-soft">
-            Level {info.order}
-          </span>
+    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-4 py-6">
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 260, damping: 28 }} className="flex flex-1 flex-col">
+        <div className="card-shell-dark">
+          <div className="card-core arena-panel relative overflow-hidden p-6 text-white">
+            <div className="pointer-events-none absolute -right-14 -top-14 h-48 w-48 rounded-full bg-amber/25 blur-3xl" aria-hidden />
+            <div className="relative flex items-center justify-between">
+              <p className="eyebrow bg-white/10 text-amber-200 ring-1 ring-white/20">Briefing</p>
+              <span className="rounded-full bg-black/30 px-2.5 py-1 text-[11px] font-bold text-white/80 ring-1 ring-white/15 tabular-nums">
+                Level {info.order}
+              </span>
+            </div>
+            <h1 className="relative mt-3 font-display text-[1.8rem] font-black leading-[1.08] tracking-tight">{info.topic}</h1>
+          </div>
         </div>
-        <h1 className="mt-2 font-display text-3xl font-extrabold leading-tight tracking-tight">{info.topic}</h1>
 
-        <dl className="mt-8 space-y-3 text-sm">
-          <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-            <dt className="text-ink-soft">Skill target</dt>
-            <dd className="font-semibold capitalize">{info.skill}</dd>
+        <dl className="mt-4 space-y-2 text-sm">
+          <div className="card-paper flex items-center justify-between rounded-2xl px-4 py-3.5">
+            <dt className="font-medium text-ink-soft">Skill target</dt>
+            <dd className="font-black capitalize">{info.skill}</dd>
           </div>
-          <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-            <dt className="text-ink-soft">Difficulty</dt>
-            <dd className="font-semibold capitalize">{info.difficulty}</dd>
+          <div className="card-paper flex items-center justify-between rounded-2xl px-4 py-3.5">
+            <dt className="font-medium text-ink-soft">Difficulty</dt>
+            <dd className="font-black capitalize">{info.difficulty}</dd>
           </div>
-          <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-            <dt className="text-ink-soft">Format</dt>
-            <dd className="font-semibold">Continuous Spoken Spar</dd>
+          <div className="card-paper flex items-center justify-between rounded-2xl px-4 py-3.5">
+            <dt className="font-medium text-ink-soft">Format</dt>
+            <dd className="font-black">Continuous spoken spar</dd>
           </div>
-          <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-            <dt className="text-ink-soft">Estimated time</dt>
-            <dd className="font-semibold">~{info.minutes || 3} min</dd>
+          <div className="card-paper flex items-center justify-between rounded-2xl px-4 py-3.5">
+            <dt className="font-medium text-ink-soft">Estimated time</dt>
+            <dd className="font-black tabular-nums">~{info.minutes || 3} min</dd>
           </div>
         </dl>
 
-        <p className="mt-6 rounded-2xl bg-rally-mist px-4 py-3 text-sm text-rally-deep">{info.reminder}</p>
+        <p className="mt-4 rounded-2xl border border-rally/20 bg-gradient-to-br from-[#eef7f1] to-rally-mist px-4 py-3.5 text-sm font-medium text-rally-deep shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">{info.reminder}</p>
 
-        <p className="mt-8 font-semibold">Choose your side.</p>
-        <div className="mt-2 flex gap-3">
+        <p className="mt-7 font-display text-lg font-black">Choose your side</p>
+        <div className="mt-2.5 grid grid-cols-2 gap-2.5">
           <button
             disabled={starting}
             onClick={() => onSelectSide("agree")}
             aria-pressed={side === "agree"}
-            className={`flex-1 rounded-full border-2 py-3 font-semibold transition-colors disabled:cursor-not-allowed ${side === "agree" ? "border-rally bg-rally-mist text-rally-deep" : "border-ink/10 bg-white"}`}
+            className={`rounded-2xl border py-4 text-center font-black transition-all duration-300 active:scale-[0.98] disabled:cursor-not-allowed ${side === "agree" ? "border-rally bg-gradient-to-b from-[#eef7f1] to-rally-mist text-rally-deep shadow-[0_10px_24px_-12px_rgba(14,122,95,0.6)]" : "hairline card-paper hover:-translate-y-0.5"}`}
           >
+            <span className="block text-[10px] font-bold uppercase tracking-[0.16em] opacity-60">Take side</span>
             Agree
           </button>
           <button
             disabled={starting}
             onClick={() => onSelectSide("disagree")}
             aria-pressed={side === "disagree"}
-            className={`flex-1 rounded-full border-2 py-3 font-semibold transition-colors disabled:cursor-not-allowed ${side === "disagree" ? "border-coral bg-coral-soft text-coral" : "border-ink/10 bg-white"}`}
+            className={`rounded-2xl border py-4 text-center font-black transition-all duration-300 active:scale-[0.98] disabled:cursor-not-allowed ${side === "disagree" ? "border-coral bg-gradient-to-b from-[#fff1ec] to-coral-soft text-coral-deep shadow-[0_10px_24px_-12px_rgba(228,87,61,0.6)]" : "hairline card-paper hover:-translate-y-0.5"}`}
           >
+            <span className="block text-[10px] font-bold uppercase tracking-[0.16em] opacity-60">Take side</span>
             Disagree
           </button>
         </div>

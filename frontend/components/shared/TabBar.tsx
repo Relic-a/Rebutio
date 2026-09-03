@@ -14,18 +14,21 @@ const tabs = [
 export function TabBar() {
   const pathname = usePathname();
   return (
-    <nav aria-label="Main navigation" className="fixed inset-x-0 bottom-0 z-40 border-t border-ink/10 bg-parchment/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
-      <div className="mx-auto flex max-w-md items-stretch justify-around">
+    <nav aria-label="Main navigation" className="fixed inset-x-0 bottom-0 z-40 px-4 pb-[calc(0.9rem+env(safe-area-inset-bottom))] pt-2">
+      <div className="mx-auto flex w-full max-w-md items-stretch justify-between gap-1 rounded-[1.75rem] border border-white/40 bg-ink/[0.82] p-1.5 shadow-[0_20px_48px_-16px_rgba(28,33,29,0.55),inset_0_1px_0_rgba(255,255,255,0.18)] backdrop-blur-2xl">
         {tabs.map((t) => {
-          const active = pathname === t.href;
+          const active = pathname === t.href || (t.href !== "/home" && pathname.startsWith(t.href));
           return (
             <Link
               key={t.href}
               href={t.href}
               aria-current={active ? "page" : undefined}
-              className={`flex min-w-16 flex-col items-center gap-0.5 px-3 py-2.5 text-[11px] font-medium ${active ? "text-rally" : "text-ink-soft"}`}
+              className={`group relative flex min-w-0 flex-1 flex-col items-center gap-1 rounded-2xl px-2 py-2.5 text-[11px] font-semibold transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+                active ? "bg-[#faf6ef] text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_8px_20px_-8px_rgba(0,0,0,0.5)]" : "text-white/60 hover:bg-white/10 hover:text-white"
+              }`}
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              {active && <span className="absolute -top-1 h-1 w-8 rounded-full bg-amber shadow-[0_0_12px_rgba(232,155,46,0.9)]" aria-hidden />}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.1 : 1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="transition-transform duration-300 group-active:scale-90">
                 <path d={t.icon} />
               </svg>
               {t.label}

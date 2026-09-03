@@ -82,16 +82,19 @@ export default function CoachHomePage() {
   }
 
   return (
-    <main className="mx-auto min-h-dvh w-full max-w-md bg-parchment px-5 py-6 pb-24 text-ink flex flex-col">
+    <main className="mx-auto min-h-dvh w-full max-w-md px-4 py-6 pb-32 text-ink flex flex-col">
       {/* 1. Header */}
-      <header className="mb-5">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-rally">Personal AI Coach</span>
-        <h1 className="font-display text-2xl font-black tracking-tight text-ink">
-          Coaching & Longitudinal Insights
-        </h1>
-        <p className="mt-1 text-xs text-ink-soft">
-          Evidence-based guidance tailored to your spoken debate patterns.
-        </p>
+      <header className="card-shell-dark">
+        <div className="card-core arena-panel relative overflow-hidden p-5 text-white">
+          <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-amber/25 blur-3xl" aria-hidden />
+          <span className="eyebrow relative bg-white/10 text-amber-200 ring-1 ring-white/20">Personal AI coach</span>
+          <h1 className="relative mt-2.5 font-display text-[1.7rem] font-black leading-tight tracking-tight">
+            Coaching & longitudinal insights
+          </h1>
+          <p className="relative mt-1.5 text-[13px] font-medium leading-relaxed text-white/70">
+            Evidence-based guidance tuned to your spoken debate patterns.
+          </p>
+        </div>
       </header>
 
       {loading ? (
@@ -100,9 +103,10 @@ export default function CoachHomePage() {
           <p className="text-xs font-semibold">Loading your coaching dashboard...</p>
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="mt-4 space-y-4">
           {/* 2. Active Focus Card */}
-          <section className="rounded-2xl bg-white p-4 border border-rally/20 shadow-sm">
+          <section className="card-shell">
+            <div className="card-core card-paper p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-xs font-bold text-rally">
                 <span className="w-2 h-2 rounded-full bg-rally animate-pulse" />
@@ -122,6 +126,7 @@ export default function CoachHomePage() {
             <p className="mt-1 text-xs text-ink-soft leading-relaxed">
               {data?.focusDetails || "Observed across your recent debates. Moving towards consistent mastery."}
             </p>
+            </div>
           </section>
 
           {/* 3. Quick-Start Question Presets */}

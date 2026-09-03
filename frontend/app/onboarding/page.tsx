@@ -205,34 +205,45 @@ export default function OnboardingPage() {
 function Welcome({ onNext }: { onNext: () => void }) {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex min-h-[85dvh] flex-col">
-      <Logo size={40} />
-      <div className="mt-14">
-        <h1 className="font-display text-4xl font-extrabold leading-[1.08] tracking-tight">
-          Speak English like you already <span className="text-rally">think</span> in it.
+      <Logo size={36} />
+      <div className="mt-10">
+        <span className="eyebrow bg-ink text-[#ffe9bd]">Live spoken sparring</span>
+        <h1 className="mt-4 font-display text-[2.6rem] font-black leading-[1.02] tracking-tight">
+          Speak English like you already <span className="bg-gradient-to-r from-rally via-emerald-500 to-amber bg-clip-text text-transparent">think</span> in it.
         </h1>
-        <p className="mt-4 text-lg text-ink-soft">Get better at English by defending ideas worth talking about.</p>
+        <p className="mt-4 max-w-[30ch] text-[17px] leading-relaxed text-ink-soft">Defend ideas worth talking about. A coach listens, scores, and sharpens every turn.</p>
       </div>
 
       {/* miniature live debate preview */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.25 }}
-        className="mt-10 rounded-3xl bg-white p-5 shadow-[0_8px_30px_rgba(34,39,31,0.08)]"
+        transition={{ delay: 0.25, type: "spring", stiffness: 220, damping: 26 }}
+        className="card-shell mt-8"
       >
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft">Today&apos;s spar</p>
-        <p className="mt-1 font-display text-xl font-bold leading-snug">College is overrated.</p>
-        <div className="mt-4 flex gap-3">
-          <span className="flex-1 rounded-full bg-rally-mist py-2.5 text-center text-sm font-semibold text-rally-deep">Agree</span>
-          <span className="flex-1 rounded-full bg-coral-soft py-2.5 text-center text-sm font-semibold text-coral">Disagree</span>
+        <div className="card-core relative overflow-hidden bg-ink p-5 text-white">
+          <div className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-rally/50 blur-2xl" aria-hidden />
+          <div className="relative flex items-center justify-between">
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/60">Today&apos;s spar</p>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-bold text-emerald-200 ring-1 ring-white/15">
+              <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-emerald-300" />
+              Live
+            </span>
+          </div>
+          <p className="relative mt-2 font-display text-[1.45rem] font-black leading-snug">College is overrated.</p>
+          <div className="relative mt-4 flex gap-2.5">
+            <span className="flex-1 rounded-full bg-[#e8f5ee] py-2.5 text-center text-sm font-black text-rally-deep">Agree</span>
+            <span className="flex-1 rounded-full bg-[#ffe9e3] py-2.5 text-center text-sm font-black text-coral-deep">Disagree</span>
+          </div>
         </div>
       </motion.div>
 
       <div className="mt-auto pt-10">
-        <Button onClick={onNext} className="w-full">
+        <Button onClick={onNext} className="w-full text-lg">
           Start my first debate
+          <span aria-hidden>→</span>
         </Button>
-        <p className="mt-4 text-center text-xs text-ink-soft">Live spoken spar. No grammar drills. Just argue.</p>
+        <p className="mt-4 text-center text-xs font-medium text-ink-soft">Live spoken spar · No grammar drills · Just argue</p>
       </div>
     </motion.div>
   );
@@ -254,16 +265,17 @@ function ChoiceStep({
   onContinue: () => void;
 }) {
   return (
-    <motion.div initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} className="flex min-h-[85dvh] flex-col">
-      <h1 className="font-display text-3xl font-extrabold leading-tight tracking-tight">{title}</h1>
-      {sub && <p className="mt-2 text-sm text-ink-soft">{sub}</p>}
+    <motion.div initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ type: "spring", stiffness: 260, damping: 30 }} className="flex min-h-[85dvh] flex-col">
+      <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-rally">Step forward</p>
+      <h1 className="mt-1.5 font-display text-[2rem] font-black leading-[1.05] tracking-tight">{title}</h1>
+      {sub && <p className="mt-2 text-sm font-medium text-ink-soft">{sub}</p>}
       <div className="mt-8 flex-1">{children}</div>
       <div className="flex items-center gap-4 pt-8">
-        <button onClick={onBack} className="text-sm font-medium text-ink-soft underline underline-offset-4">
-          Back
+        <button onClick={onBack} className="rounded-full px-4 py-3 text-sm font-bold text-ink-soft transition-colors hover:bg-ink/5 hover:text-ink">
+          ← Back
         </button>
         <Button onClick={onContinue} disabled={!canContinue} className="ml-auto min-w-40">
-          Continue
+          Continue →
         </Button>
       </div>
     </motion.div>
@@ -275,11 +287,21 @@ function Chip({ children, selected, onClick }: { children: React.ReactNode; sele
     <button
       onClick={onClick}
       aria-pressed={selected}
-      className={`rounded-2xl border-2 px-5 py-4 text-left font-semibold transition-all ${
-        selected ? "border-rally bg-rally-mist text-rally-deep" : "border-ink/10 bg-white text-ink"
+      className={`group flex items-center justify-between gap-3 rounded-2xl border px-5 py-4 text-left font-bold transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98] ${
+        selected
+          ? "border-rally bg-gradient-to-b from-[#eef7f1] to-rally-mist text-rally-deep shadow-[0_10px_24px_-12px_rgba(14,122,95,0.5),inset_0_1px_0_rgba(255,255,255,0.8)]"
+          : "hairline card-paper hover:-translate-y-0.5"
       }`}
     >
-      {children}
+      <span>{children}</span>
+      <span
+        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-black transition-all ${
+          selected ? "bg-rally text-white" : "bg-ink/8 text-ink-faint group-hover:bg-ink/12"
+        }`}
+        aria-hidden
+      >
+        {selected ? "✓" : "+"}
+      </span>
     </button>
   );
 }

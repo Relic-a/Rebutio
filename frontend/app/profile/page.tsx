@@ -74,9 +74,15 @@ export default function ProfilePage() {
   if (!onboarded) return <main className="flex min-h-dvh items-center justify-center" />;
 
   return (
-    <main className="mx-auto min-h-dvh w-full max-w-md px-5 pb-28 pt-6">
-      <h1 className="font-display text-3xl font-extrabold tracking-tight">Profile</h1>
-      <p className="mt-1 text-sm text-ink-soft">Your debate settings and privacy preferences.</p>
+    <main className="mx-auto min-h-dvh w-full max-w-md px-4 pb-32 pt-6">
+      <header className="card-shell-dark">
+        <div className="card-core arena-panel relative overflow-hidden p-5 text-white">
+          <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-amber/25 blur-3xl" aria-hidden />
+          <p className="relative text-[10px] font-bold uppercase tracking-[0.2em] text-white/60">Profile</p>
+          <h1 className="relative mt-1 font-display text-[1.7rem] font-black tracking-tight">Tune your arena</h1>
+          <p className="relative mt-1 text-[13px] font-medium text-white/70">Debate settings and privacy preferences.</p>
+        </div>
+      </header>
 
       <section className="mt-8">
         <h2 className="font-display text-lg font-bold">Your goals</h2>

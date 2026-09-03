@@ -388,38 +388,58 @@ export function ContinuousDebateFlow({
   };
 
   return (
-    <main className="mx-auto flex h-dvh w-full max-w-lg flex-col bg-parchment text-ink">
+    <main className="mx-auto flex h-dvh w-full max-w-lg flex-col bg-transparent text-ink">
       {/* 1. Header: Topic, Soft Timer, Finish Control */}
-      <header className="flex shrink-0 items-center justify-between border-b border-ink/10 bg-white/80 px-4 py-3 backdrop-blur-md">
-        <div className="flex flex-col min-w-0 pr-3">
-          <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-[10px] font-bold uppercase tracking-wider text-ink-soft">
-              Live Debate Spar
+      <header className="z-10 shrink-0 border-b border-ink/10 bg-[#fffdf7]/85 px-4 py-3 backdrop-blur-xl">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-col pr-2">
+            <div className="flex items-center gap-1.5">
+              <span className="relative flex h-2 w-2" aria-hidden>
+                <span className="absolute h-full w-full animate-ring rounded-full bg-emerald-500" />
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              </span>
+              <span className="text-[10px] font-black uppercase tracking-[0.18em] text-ink-soft">
+                Live spar · Turn {turnIndex}/{totalTurns}
+              </span>
+            </div>
+            <h1 className="truncate text-sm font-black text-ink" title={session.topic}>
+              {session.topic}
+            </h1>
+            <span className="mt-1 h-1 w-full overflow-hidden rounded-full bg-ink/8">
+              <span
+                className="block h-full rounded-full bg-gradient-to-r from-rally to-emerald-300 transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.round((turnIndex / Math.max(totalTurns, 1)) * 100))}%` }}
+              />
             </span>
           </div>
-          <h1 className="truncate text-sm font-bold text-ink" title={session.topic}>
-            {session.topic}
-          </h1>
-        </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <DebateTimer />
+          <div className="flex shrink-0 items-center gap-2">
+            <DebateTimer />
 
-          <button
-            onClick={() => setShowFinishModal(true)}
-            className="rounded-full bg-ink/5 px-3 py-1 text-xs font-semibold text-ink hover:bg-coral/10 hover:text-coral transition-colors"
-            title="Conclude debate"
-          >
-            Finish
-          </button>
+            <button
+              onClick={() => setShowFinishModal(true)}
+              className="rounded-full border border-ink/10 bg-white px-3.5 py-1.5 text-xs font-black text-ink shadow-sm transition-all hover:-translate-y-px hover:border-coral/40 hover:text-coral active:translate-y-0"
+              title="Conclude debate"
+            >
+              Finish
+            </button>
+          </div>
         </div>
       </header>
 
       {/* 2. Target Skill Banner */}
-      <div className="shrink-0 bg-rally-mist/50 px-4 py-2 border-b border-rally/10 flex items-center justify-between text-xs text-rally-deep">
-        <span className="font-semibold">Focus: {session.skillTarget.name}</span>
-        <span className="text-ink-soft text-[11px]">{session.userSide === "agree" ? "Your Stance: Agree" : "Your Stance: Disagree"}</span>
+      <div className="shrink-0 border-b border-rally/15 bg-gradient-to-r from-rally-mist via-[#eef7f1] to-amber-soft/60 px-4 py-2.5">
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="inline-flex min-w-0 items-center gap-1.5 font-black text-rally-deep">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden>
+              <circle cx="12" cy="12" r="9" />
+              <circle cx="12" cy="12" r="4.5" />
+              <circle cx="12" cy="12" r="0.8" fill="currentColor" />
+            </svg>
+            <span className="truncate">Focus · {session.skillTarget.name}</span>
+          </span>
+          <span className="shrink-0 rounded-full bg-ink px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-[#ffe9bd]">{session.userSide === "agree" ? "Agree" : "Disagree"}</span>
+        </div>
       </div>
 
       {/* 3. Continuous Conversation Stream */}
@@ -467,10 +487,10 @@ export function ContinuousDebateFlow({
                 )}
 
                 <div
-                  className={`rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
+                  className={`rounded-[1.3rem] px-4 py-3 text-sm leading-relaxed ${
                     isOpponent
-                      ? "bg-white text-ink rounded-bl-sm border border-ink/10"
-                      : "bg-rally text-white rounded-br-sm"
+                      ? "bg-[#fffdf7] text-ink rounded-bl-md border border-ink/10 shadow-[0_10px_24px_-14px_rgba(28,33,29,0.45),inset_0_1px_0_rgba(255,255,255,0.9)]"
+                      : "bg-gradient-to-br from-rally to-rally-deep text-white rounded-br-md shadow-[0_14px_28px_-14px_rgba(14,122,95,0.7),inset_0_1px_0_rgba(255,255,255,0.25)]"
                   }`}
                 >
                   <p className="whitespace-pre-wrap">{t.text}</p>
@@ -524,7 +544,7 @@ export function ContinuousDebateFlow({
       </div>
 
       {/* 5. Persistent Bottom Composer (Voice + Text Mode) */}
-      <footer className="shrink-0 border-t border-ink/10 bg-white p-4 shadow-lg">
+      <footer className="shrink-0 border-t border-ink/10 bg-[#fffdf7]/92 p-4 shadow-[0_-16px_40px_-20px_rgba(28,33,29,0.35)] backdrop-blur-xl">
         {turnError && (
           <div className="mb-3 rounded-xl bg-coral-soft/60 px-3 py-2 text-xs text-coral font-medium flex items-center justify-between">
             <span>{turnError}</span>
@@ -630,10 +650,10 @@ export function ContinuousDebateFlow({
                 <button
                   onClick={startRecording}
                   disabled={phase === "processing"}
-                  className="group relative flex h-14 w-14 items-center justify-center rounded-full bg-rally text-white shadow-lg transition-transform active:scale-95 disabled:opacity-50"
+                  className="group relative flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-b from-rally to-rally-deep text-white shadow-[0_18px_36px_-12px_rgba(14,122,95,0.75),inset_0_1px_0_rgba(255,255,255,0.35)] transition-transform duration-300 hover:scale-[1.04] active:scale-95 disabled:opacity-50"
                   title="Press to speak"
                 >
-                  <div className="absolute inset-0 rounded-full bg-rally/30 group-hover:scale-110 transition-transform -z-10" />
+                  <span className="absolute inset-0 -z-10 rounded-full bg-rally/25 transition-transform duration-500 group-hover:scale-125" aria-hidden />
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
                     <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
                     <path d="M19 10v2a7 7 0 0 1-14 0v-2" />

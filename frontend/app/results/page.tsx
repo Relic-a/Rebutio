@@ -108,36 +108,42 @@ function Results() {
   const pronunciationAdvice = r.pronunciationAdvice;
 
   return (
-    <main className="mx-auto min-h-dvh w-full max-w-md px-5 py-8 bg-parchment text-ink flex flex-col pb-16">
+    <main className="mx-auto min-h-dvh w-full max-w-md px-4 py-6 text-ink flex flex-col pb-16">
       {/* 1. Header & Outcome */}
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="text-center">
-        <span className={`inline-block rounded-full border px-4 py-1 text-xs font-bold uppercase tracking-wider ${outcomeColor}`}>
-          {outcomeLabel}
-        </span>
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 260, damping: 26 }}>
+        <div className="card-shell-dark">
+          <div className="card-core arena-panel relative overflow-hidden p-6 text-center text-white">
+            <div className="pointer-events-none absolute -left-12 -top-12 h-44 w-44 rounded-full bg-amber/25 blur-3xl" aria-hidden />
+            <div className="pointer-events-none absolute -bottom-14 -right-10 h-44 w-44 rounded-full bg-rally/40 blur-3xl" aria-hidden />
+            <span className={`relative inline-block rounded-full px-4 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] ring-1 ${outcomeColor} shadow-sm`}>
+              {outcomeLabel}
+            </span>
 
-        <h1 className="mt-3 font-display text-2xl font-black tracking-tight text-ink">
-          Speaking Review
-        </h1>
-        <p className="mt-1 text-xs text-ink-soft max-w-xs mx-auto truncate font-medium">
-          {r.topic}
-        </p>
+            <h1 className="relative mt-3 font-display text-[1.9rem] font-black tracking-tight">
+              Speaking review
+            </h1>
+            <p className="relative mx-auto mt-1 max-w-xs truncate text-[13px] font-medium text-white/70">
+              {r.topic}
+            </p>
 
-        {/* Badges */}
-        <div className="mt-3 flex items-center justify-center gap-3 text-xs font-bold">
-          {r.xpEarned > 0 ? (
-            <span className="rounded-full bg-rally-mist px-3 py-1 text-rally-deep">
-              +{r.xpEarned} XP
-            </span>
-          ) : (
-            <span className="rounded-full bg-ink/5 px-3 py-1 text-ink-soft">
-              Session Recorded
-            </span>
-          )}
-          {r.streakExtended && (
-            <span className="rounded-full bg-amber-soft px-3 py-1 text-amber-900">
-              🔥 Streak Maintained
-            </span>
-          )}
+            {/* Badges */}
+            <div className="relative mt-4 flex items-center justify-center gap-2 text-xs font-black tabular-nums">
+              {r.xpEarned > 0 ? (
+                <span className="rounded-full bg-[#ffe9bd] px-3.5 py-1.5 text-ink shadow">
+                  +{r.xpEarned} XP
+                </span>
+              ) : (
+                <span className="rounded-full bg-white/12 px-3.5 py-1.5 text-white/80 ring-1 ring-white/20">
+                  Session recorded
+                </span>
+              )}
+              {r.streakExtended && (
+                <span className="rounded-full bg-white/12 px-3.5 py-1.5 text-amber-200 ring-1 ring-white/20">
+                  Streak kept
+                </span>
+              )}
+            </div>
+          </div>
         </div>
       </motion.div>
 
@@ -154,7 +160,7 @@ function Results() {
 
         <div className="grid grid-cols-2 gap-2.5">
           {/* Clarity */}
-          <div className="rounded-2xl bg-white p-3.5 border border-ink/5 shadow-sm">
+          <div className="card-paper rounded-[1.3rem] p-3.5 transition-transform duration-300 hover:-translate-y-0.5">
             <div className="flex items-baseline justify-between">
               <span className="text-xs font-bold text-ink">Clarity</span>
               <span className="font-mono text-lg font-black text-rally">
@@ -172,7 +178,7 @@ function Results() {
           </div>
 
           {/* Grammar */}
-          <div className="rounded-2xl bg-white p-3.5 border border-ink/5 shadow-sm">
+          <div className="card-paper rounded-[1.3rem] p-3.5 transition-transform duration-300 hover:-translate-y-0.5">
             <div className="flex items-baseline justify-between">
               <span className="text-xs font-bold text-ink">Grammar</span>
               <span className="font-mono text-lg font-black text-rally">
@@ -190,7 +196,7 @@ function Results() {
           </div>
 
           {/* Vocabulary */}
-          <div className="rounded-2xl bg-white p-3.5 border border-ink/5 shadow-sm">
+          <div className="card-paper rounded-[1.3rem] p-3.5 transition-transform duration-300 hover:-translate-y-0.5">
             <div className="flex items-baseline justify-between">
               <span className="text-xs font-bold text-ink">Vocabulary</span>
               <span className="font-mono text-lg font-black text-rally">
@@ -208,7 +214,7 @@ function Results() {
           </div>
 
           {/* Delivery */}
-          <div className="rounded-2xl bg-white p-3.5 border border-ink/5 shadow-sm">
+          <div className="card-paper rounded-[1.3rem] p-3.5 transition-transform duration-300 hover:-translate-y-0.5">
             <div className="flex items-baseline justify-between">
               <span className="text-xs font-bold text-ink">Delivery</span>
               <span className="font-mono text-lg font-black text-rally">
